@@ -1,0 +1,68 @@
+[tool.poetry]
+name = "quant-data"
+authors = ["Yubeen"]
+version = "0.1.0"
+description = "시세 받기 · 판정 · 합성을 한곳에서 관리하고 사용처 저장소로 내보내는 데이터 저장소"
+packages = [
+    {include = "quant_data", from = "src"},
+]
+
+[tool.poetry.dependencies]
+python = "~3.12"
+pandas = "^2.0.0"
+yfinance = "^0.2.0"
+pykrx = "^1.0"
+python-dotenv = "^1.2.2"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.0.0"
+ruff = "^0.8.0"
+pandas-stubs = "^2.0.0"
+pytest = "^9.0.2"
+pytest-cov = "^7.0.0"
+pyright = "^1.1.407"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# PLC0415 가 이 ruff 버전에서 미리보기 규칙이라 preview 를 켠다. explicit-preview-rules 가 다른 미리보기
+# 규칙은 막지만, 안정 규칙의 미리보기 동작은 함께 켜진다(F841 이 튜플 언패킹의 안 쓰는 이름까지 본다).
+# PLC0415 가 안정 규칙인 버전으로 올리면 아래 두 줄을 지운다
+preview = true
+explicit-preview-rules = true
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "PLC0415", # 함수 안 import 금지
+    "RUF100", # 쓰이지 않는 noqa 금지
+]
+ignore = [
+    "E501",  # line too long은 Black 스타일 존중
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["quant_data"]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+show_missing = true

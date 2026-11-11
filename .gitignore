@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# 가상환경
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code 개인 설정 — 저장소 규칙(.claude/rules · .claude/settings.json)은 추적한다
+.claude/settings.local.json
+
+# 자격증명(KRX 계정) — 저장소에 절대 포함하지 않는다
+.env
+.env.*
+
+# 데이터(storage/)는 git 으로 동기화한다 — 다른 PC 로 옮기는 통로이고, 사용처는 내보낸 사본을 따로 커밋한다
+
+# 실행 로그
+logs/

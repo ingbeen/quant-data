@@ -1,0 +1,41 @@
+{
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "include": ["src", "tests", "scripts", "validate_project.py"],
+  "exclude": ["storage", "**/__pycache__", "**/.ruff_cache", "**/node_modules", "**/.*"],
+  "extraPaths": ["src"],
+  "reportMissingTypeStubs": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownLambdaType": "none",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "reportMissingParameterType": "none",
+      "reportMissingTypeArgument": "none",
+      "reportPrivateUsage": "none",
+      "reportUnnecessaryIsInstance": "none",
+      "reportUnnecessaryComparison": "none",
+      "reportImportCycles": "none",
+      "reportUnusedVariable": "none",
+      "reportGeneralTypeIssues": "none",
+      "reportArgumentType": "none"
+    },
+    {
+      "root": "scripts",
+      "reportMissingParameterType": "none",
+      "reportMissingTypeArgument": "none",
+      "reportPrivateUsage": "none",
+      "reportUnnecessaryIsInstance": "none",
+      "reportUnnecessaryComparison": "none",
+      "reportImportCycles": "none",
+      "reportUnusedVariable": "none",
+      "reportGeneralTypeIssues": "none",
+      "reportUntypedFunctionDecorator": "none",
+      "reportArgumentType": "none"
+    }
+  ]
+}

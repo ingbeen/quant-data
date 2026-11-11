@@ -1,0 +1,6 @@
+{
+  "quality_check": "poetry run python validate_project.py",
+  "auto_format": "poetry run black .",
+  "evidence_home": "docs/",
+  "deferred_findings": "docs/DEFERRED_FINDINGS.md"
+}
