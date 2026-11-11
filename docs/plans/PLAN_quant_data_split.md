@@ -12,7 +12,7 @@
 ---
 
 **작성일**: 2026-11-11 10:58
-**마지막 업데이트**: 2026-11-11 12:44
+**마지막 업데이트**: 2026-11-11 14:40
 **관련 범위**: 새 저장소 quant-data(받기 · 판정 · 가공 · 내보내기), quant(scripts/data · utils · tqqq 이관과 삭제, 시세 경로, storage/stock · etc, 문서), verify-lab(읽기만 — 수집 대상을 데이터 저장소가 처음 한 번 받아 대조)
 **관련 문서**: quant — CLAUDE.md, docs/MEMORY.md, docs/CLAUDE.md, docs/COMMANDS.md, README.md, scripts/CLAUDE.md, src/qbt/CLAUDE.md, src/qbt/utils/CLAUDE.md, src/qbt/tqqq/CLAUDE.md, src/qbt/backtest/CLAUDE.md, tests/CLAUDE.md, docs/research/합성_시세_연장.md · verify-lab — CLAUDE.md, src/verify_lab/CLAUDE.md, scripts/CLAUDE.md, reference/pykrx_실측기록.md, docs/조사/역방향.md §14
 
@@ -311,6 +311,31 @@
 - [x] quant 결과 수치 필드 차이 0, 경로 필드는 이름 변경분만(진행 로그에 파일 수 · 필드 수)
 - [x] AppTest 로 대시보드 4종 예외 0건(quant 「스크립트 실행 규칙」)
 
+**quant 커밋 준비** — 사용자 요청(2026-11-11 「다음 세션에서 quant 쪽 수정분 커밋하기 전 검증과 테스트 · 커밋 메시지 추천」). Phase 4 보다 먼저 한다. 품질 검증을 이 자리에서 돌리는 것은 「품질 검증은 마지막 Phase 에서만」 규약의 사용자 요청 예외이고, 마지막 Phase 의 두 저장소 검증은 그대로 한다.
+
+- [x] 결정 질문 한 라운드(사용자에게): ① quant 문서 중 지운 것을 가리키는 줄(진행 로그 13:34 무렵 잰 수 — 인계 「미결」)을 이 커밋에 함께 고칠지, Phase 5 로 미룰지 — 고치면 그 문서들은 quant 루트 · 해당 폴더 `CLAUDE.md` 를 먼저 `Read` 로 연다. 합성 문서 나누기(Q15)는 이름 · 자리를 사용자에게 물어야 해 Phase 5 몫 ② 커밋 전에 `/code-review` 를 돌릴지와 수준(계획서 마지막 Phase 는 두 저장소를 `/code-review xhigh` 로 본다)
+- [x] quant-data 의 최신 커밋 뒤 내보내기를 다시 돌린다 — `python3 scripts/export.py --to ../quant/storage/stock`(quant-data 에서). quant `storage/stock/quant_data_edition.json` 에 커밋 번호가 적히고 「커밋 안 된 변경」이 빈 목록인지 본다
+- [x] quant 자동 포맷 — quant 에서 `env -u VIRTUAL_ENV poetry run black .`
+- [x] quant 품질 검증 — quant 에서 `env -u VIRTUAL_ENV poetry run python validate_project.py` (passed=668, failed=0, skipped=0). 실패는 Phase 3 범위 안에서 고치고 진행 로그에 남긴다(고친 뒤 다시 돌린 결과만 이 줄에)
+- [x] ② 에서 하기로 했으면 quant 변경에 `/code-review` — 발견 6건 · 조치 6건 수정 (`/code-review` 대신 `review.md` 의 다른 저장소 방식 1회차 — 버그 0 [무거움 0 · 가벼움 0] · 그 외 6, 그 외 6건은 사용자 결정으로 수정)
+- [x] quant 변경을 대상으로 `/commit` → 후보 5개를 바로 아래 「Commit Messages (Phase 3 — quant)」에 옮긴다. **이 계획서 맨 끝 「Commit Messages (Final candidates)」에 넣지 않는다** — 그 절은 Done 직전 마지막 커밋용이고, 거기 후보가 들어가면 계획서 훅이 미완료 체크박스와 함께 턴 종료를 막는다. 커밋은 사용자가 한다
+
+#### Commit Messages (Phase 3 — quant)
+
+1. 데이터 / 시세 받기 · 합성을 quant-data 로 이관
+2. 데이터 / 받기 · 합성 코드 삭제와 quant-data 내보내기 사본으로 전환
+3. 데이터 / quant-data 가 내보낸 합성 시세 8종 수신과 파일 이름 `_synthetic.csv` 로 변경
+4. 데이터 / 받기 · 합성 · 검증 표의 quant-data 이관과 yfinance 의존성 · 문서 정리
+5. 데이터 / 시세 관리를 한 저장소로 모으는 quant-data 분리 — 결과 수치 차이 0, 경로 필드만 변경
+
+#### Commit Messages (Phase 3 — quant-data)
+
+1. 문서 / 자릿수 예외 · 합성 소개 · 미룬 지적 대기열 추가
+2. 문서 / quant 에서 옮긴 미룬 지적 2건과 전역 4자리 규칙의 예외 추가
+3. 문서 / 계획서의 인계 · quant 커밋 준비 기록과 저장소 문서 보강
+4. 문서 / 시세 · 월별 금리 6자리 예외, README 합성 소개, 미룬 지적 파일 신설과 계획서 진행 기록 갱신
+5. 문서 / quant 에서 지운 규칙 · 지적을 잃지 않게 quant-data 로 이전
+
 ---
 
 ### Phase 4 — verify-lab 몫 첫 판
@@ -383,6 +408,56 @@
 3. 진행 로그의 마지막 줄과 첫 미완료 체크박스에서 시작한다
 4. 다른 저장소의 파일을 고치기 전에 그 저장소의 루트 · 해당 폴더 `CLAUDE.md` 를 `Read` 로 연다
 5. 착수 전 측정 스크립트(scratchpad)는 사라졌을 수 있다 — 숫자는 3장 「착수 전 측정」이 정본이다
+6. 아래 「인계」를 읽고 그 「다음 할 일」부터 — 인계는 진행 로그를 대신하지 않는다. 근거 · 수치는 진행 로그가 정본이다
+
+### 인계 (2026-11-11 14:24 기준)
+
+**세션** — Claude Code 세션 ID `4fd9cbe7-248b-477f-8160-d904ca00d435` (작업 디렉터리 `/Users/yubeen/Workspace/quant-data`). 그 세션의 scratchpad 는 `/private/tmp/claude-501/-Users-yubeen-Workspace-quant-data/4fd9cbe7-248b-477f-8160-d904ca00d435/scratchpad/` — 세션이 끝나면 사라질 수 있고, 남길 숫자는 모두 진행 로그에 옮겼다. 거기 남은 것: `quant_results_baseline/`(quant HEAD `0c74948` 의 `storage/results` 895개) · `compare_results.py`(결과 대조) · `apptest_dashboards.py`(대시보드 4종) · `quant_head/`(quant HEAD 를 `git archive` 로 푼 사본) · `quant_poetry.lock.before` · 러너 로그
+
+**진행 상황**
+
+| Phase | 상태 | 한 줄 |
+|---|---|---|
+| 0 뼈대 | 끝 | 저장소 · 공통 스택 · `.venv` · `.env`(KRX 계정) |
+| 1 레드 | 끝 | 테스트 파일 21개(`tests/`) — quant 이관 테스트 + 새 규칙 테스트 |
+| 2 그린 | 끝 | `src/quant_data/` 파이썬 파일 26개(`__init__.py` 4 포함) · `scripts/update.py` · `scripts/export.py` · 첫 판(받지 않음) — 합성 8종이 quant 와 바이트 같음 |
+| 3 quant 전환 | 전환 끝 · **커밋 준비 남음** | quant 가 합성 8종만 내보내기로 받음, 결과 수치 차이 0 · 경로는 이름 변경분 61개 · 대시보드 4종 예외 0. 커밋 전 검증 · 커밋 메시지 후보가 남음(Phase 3 끝 체크박스) |
+| 4 verify-lab 몫 첫 판 | **안 함** | 다음 할 일 |
+| 5 문서 · 최종 검증 | 안 함 | Phase 4 뒤 |
+
+**작업 트리**
+
+- quant-data: 첫 커밋 `ae0e12c init`(99개 파일 — storage 36 · 테스트 21 포함). 그 뒤 이 계획서만 바뀜
+- quant: **커밋 전** — 삭제 58 · 수정 43(결과 31 포함) · 새 파일 10(`storage/stock` 의 합성 8 · `quant_data_files.txt` · `quant_data_edition.json`). 결과 diff 의 고원 CSV 12개는 11-08 시세 반영분이다(진행 로그 13:52 — 옮기다 생긴 차이 아님)
+- quant 의 `storage/stock/quant_data_edition.json` 은 quant-data 커밋 전에 내보내 「커밋: null · 커밋 안 된 변경 9」다 → quant 를 커밋하기 전에 quant-data 에서 `python3 scripts/export.py --to ../quant/storage/stock` 을 다시 돌리면 `ae0e12c` 와 「커밋 안 된 변경 없음」이 적힌다(그사이 quant-data 데이터를 고치지 않았다면 시세 파일은 그대로)
+
+**결정된 사항** — 3장 「결정 기록」 표 Q1 ~ Q36 이 정본이다(다시 묻지 않는다). 이 세션에서 더한 것: Q32 검증 표 ② ③ 굳힘 · Q33 파일 이름 `_max` 뺌 · Q34 새 파일은 미국 짝 대조 안 함 · Q35 금리 · Perth · 환율 받기 코드 옮겨 둠 · Q36 월별 금리 덧붙이기, 그리고 quant `yfinance` 의존성 제거(사용자 2026-11-11 「빼줘」). 함께 낸 가정 다섯(진행 로그 12:17)과 테스트로 굳힌 설계 판단(진행 로그 12:44)에는 사용자 이의가 없었다
+
+**미결 사항**
+
+- **Q31 금 · 장기채의 짝** — Phase 4 착수 전에 금 ↔ IAU, 장기채 ↔ 다른 장기국채 ETF(후보 미정 — 고를 때 사용자에게 보인다)의 2016년 이후 짝 차이를 재고, 짝으로 넣을지 「종목 자체 하루 변동 범위 + 패스 목록」으로 갈지 **사용자 결정**. 그전까지 GLD · TLT 는 하루 변동 50%(`new_days.TEMP_DAILY_MOVE_LIMIT`)
+- **국내 공식 등락률의 표기 자릿수** — `new_days.OFFICIAL_RATE_DECIMALS = 2` 는 자리만 잡아 둔 값이다. Phase 4 첫 측정(국내 9종 전 기간의 원본가 하루 변화 ↔ 공식 등락률)에서 실제 자릿수를 보고 고친다. 걸린 날 전부를 진행 로그에 남기고, 분할 · 병합으로 보이는 날은 사람이 공시를 확인해 `storage/records/kr_actions.csv` 에 적는다(AI 는 적지 않는다)
+- **국내 · 코인을 갱신에 잇는 코드가 아직 없다** — 함수는 있다(`domestic.build_kr_adjusted` · `krx_mismatch_days` · `load_kr_actions`, `new_days.check_kr_two_sources` · `check_kr_official_rate`). 없는 것: KRX · Bitstamp · Coin Metrics 받기(`sources/`), `catalog.Kind` 의 국내 · 코인 종류, `update` 가 국내 자료를 판정(Q34 — 새 파일이어도 국내 두 검사는 전 기간)하고 C-2 를 가공하는 연결, 판 요약의 「대조 어긋난 날」 열쇠, KRX 원본가 파일에 공식 등락률 열(`constants.COL_CHANGE_RATE`)을 남길지. verify-lab 수집기의 실측 함정(KRX 로그인 순서 · 국내 휴장일 0 가격 행 · 지수 고가 · 저가가 종가로 채워진 옛 구간 · `uint32` 언더플로)은 3장 「기존 함수 재사용」대로 옮긴다
+- **verify-lab 몫 자료가 갱신 방식 표에 없다** — `catalog.CATALOG` 는 quant 몫과 짝 지수 둘뿐이다. 3장 「자료별 갱신 방식」의 verify-lab 몫(DIA · 다우 지수 · 나스닥 종합 · 레버리지 · 인버스 11종 · 국내 ETF 9 · 지수 4 · NAV 2 · Bitstamp · Coin Metrics 3)을 더한다. 레버리지 · 인버스 11종은 분할이 잦아(SQQQ 8건) 첫 판 뒤 고정이다
+- **첫 갱신이 quant 몫도 받는다** — 인자 없는 `update.py` 는 다시 받음 · 덧붙이기 자료 전부를 받으므로 SPY 등 8종의 원본가 파일이 처음 생기고 수정주가가 판정된다(기준일까지 새 날짜가 붙음). quant 결과를 다시 돌릴지는 그때 사용자가 정한다
+- **quant 문서가 낡았다(Phase 5)** — 지운 스크립트 · 패키지 · 옛 이름을 가리키는 줄: `_synthetic_max` 126 · `qbt/tqqq` 82 · `download_data` 59 · `합성_시세_연장` 58 · `scripts/data` 43 · `generate_synthetic` 38 · `storage/etc` 21 · `proxy_validation` 19 (진행 로그 13:34 무렵 잰 수, 파일 중복 포함). 특히 quant `docs/COMMANDS.md` 워크플로우 1 · 「시세를 다시 받은 뒤 다시 돌리는 순서」 · 「데이터 다운로드 옵션」, `src/qbt/utils/CLAUDE.md` 의 지운 모듈 줄, `docs/DEFERRED_FINDINGS.md` 의 `download_data.py --end` 지적(지운 코드에 대한 것 — quant-data 로 옮길지 지울지 정한다)
+- **quant 가상환경에서 더 지운 패키지** — `poetry sync` 가 잠금 파일 밖 패키지까지 지웠다(진행 로그 13:52). quant 코드에는 영향이 없다. 사용자가 그 가상환경에서 손으로 쓰던 것이 있으면 다시 설치한다
+- **품질 검증을 아직 돌리지 않았다** — quant-data · quant 모두 Ruff · PyRight · 전체 pytest 는 Phase 5 에서. 파일 단위 pytest 만 돌렸다(quant-data 전부 통과 · quant 고친 5파일 86개 통과)
+
+**먼저 할 일 — quant 커밋 준비** (Phase 3 끝의 「quant 커밋 준비」 체크박스가 정본이다. 6장 Phases 의 첫 미완료 체크박스가 여기다 — 1장 목표 · 4장 완료 조건의 체크박스는 Done 때 닫는 칸이라 시작점이 아니다)
+
+1. 사용자에게 결정 두 가지를 한 라운드로 묻는다 — quant 문서를 이 커밋에 함께 고칠지 · 커밋 전 `/code-review` 를 할지와 수준
+2. 다시 내보내기(커밋 번호가 판 요약에 적히게) → quant `black` → quant `validate_project.py`(실패는 고치고 진행 로그에) → (정했으면) `/code-review`
+3. quant 변경을 대상으로 `/commit` → 후보를 Phase 3 의 「Commit Messages (Phase 3 — quant)」에 옮긴다 — 최종 후보 절에 넣지 않는다. 커밋은 사용자가 한다
+4. 이 계획서의 변경(인계 · 진행 로그)은 quant-data 쪽 커밋 대상이다 — 그것도 사용자가 한다
+
+**다음 할 일** (Phase 4 — quant 커밋 준비 뒤)
+
+1. verify-lab `CLAUDE.md` · `src/verify_lab/CLAUDE.md` · `reference/pykrx_실측기록.md` 8.2 · `src/verify_lab/data/*_collector.py` 를 `Read` 로 연다
+2. 착수 전 측정 ① — verify-lab 의 국내 원본가 9종(`storage/market/{코드}_max.csv`)에 KRX 공식 등락률을 받아 전 기간 대조: 걸린 날 전부 · 공식 등락률 자릿수 → 진행 로그. 측정 코드는 scratchpad(KRX 로그인 시 아이디가 표준출력에 찍힘 — 로그를 옮길 때 그 줄을 뺀다)
+3. 착수 전 측정 ② — Q31 짝 후보의 2016년 이후 짝 차이 → 진행 로그 → **사용자에게 결정 질문**
+4. 측정 결과로 국내 · 코인 받기와 갱신 연결을 테스트 먼저(Phase 1 방식) 구현하고, verify-lab 몫을 갱신 방식 표에 더한다
+5. 갱신을 돌려 verify-lab 몫 첫 판을 받고, 국내 수정주가 대조 · verify-lab 기존 파일과의 대조를 진행 로그에 남긴다(Phase 4 Validation)
 
 ### 2단계(국내 합성 연구)로 넘길 것
 
@@ -405,3 +480,12 @@
 - 2026-11-11 13:34: 사용자 「이어서 진행」 → Phase 3 착수. quant 규칙 문서(`docs/MEMORY.md` · `docs/CLAUDE.md` · `docs/COMMANDS.md` · `src/qbt/backtest/CLAUDE.md`)를 엶. 기준: quant HEAD `0c74948` 깨끗한 상태의 `storage/results` 895개(209M)를 scratchpad `quant_results_baseline/` 로 복사. 남는 quant 코드가 쓰는 시세 경로 상수는 합성 8종뿐(실물 · 고정 · 금 원본 경로는 남는 코드 0건) → quant `storage/stock/quant_data_files.txt` 에 합성 8개만. quant 고침: `common_constants.py`(합성 경로 → `*_synthetic.csv`, 이관 경로 상수 · `ETC_DIR` · `PROXY_VALIDATION_RESULTS_DIR` · `FRED_DATE_COLUMN` 지움 — 남는 코드 0건) · `utils/data_loader.py`(합성 ↔ 실물 짝 `_synthetic.csv` ↔ `_adjusted.csv`, 안내 문구를 quant-data 갱신 · 내보내기로 — quant 가 합성만 받으므로 지금은 짝 실물이 없어 걸리지 않는 검사다) · 테스트 `test_data_loader`(이름 · 안내) · `test_portfolio_configs` 4 · `test_buffer_zone` 3 · `test_buy_and_hold` 3(이름 끝) · **`test_integration` 의 `TestTQQQSimulationWorkflow`(계획서 이관 목록 밖 — 지운 `qbt.tqqq` 를 import, 같은 연결은 quant-data `test_leveraged_synthetic` 이 지킴)를 빼고 백테스트 파이프라인 테스트만 둠** · `conftest.py` 의 `sample_ffr_df` · `sample_expense_df`(이번 삭제로 쓰는 곳 0). 지움 58개(모두 git 추적): `scripts/data/` 2 · `utils` 이관 모듈 5 · `src/qbt/tqqq/` 7 · 이관 테스트 11 · `storage/etc` 4 · `storage/results/proxy_validation` 6 · `storage/stock/*_max.csv` 23. 손대지 않음: 테스트가 임시 폴더에 아무 이름으로 쓰는 `QQQ_max.csv` 같은 글자(이름 규칙과 무관), quant `pyproject.toml` 의 `yfinance`(남는 코드 0건 — 잠금 파일을 바꾸는 일이라 따로 보고). quant 고친 테스트 5파일 86개 통과. 내보내기: `python3 scripts/export.py --to ../quant/storage/stock` → 종료 코드 0, 8개 복사, 판 요약에 커밋 없음 · 커밋 안 된 변경 9개(quant-data 커밋 전), 8종 모두 quant-data 원본 · quant 옛 합성(HEAD)과 바이트 같음. 다른 python3 로도 돌려 봄 — `/usr/bin/python3` 3.9.6 은 본문의 `str | None` 에서 `TypeError` 로 시작도 못 함 · brew 3.14.6 · pyenv 3.12.13 은 성공 → 진입점 `scripts/export.py` 가 3.10 미만이면 안내와 함께 종료 코드 1, COMMANDS 의 「어느 python3 로도」를 「파이썬 3.10 이상」으로 고침. quant 러너 넷(단일 · 워크포워드 · 고원 · 포트폴리오)을 백그라운드로 돌리는 중
 - 2026-11-11 13:40: 사용자 「빼줘」(quant 의 `yfinance`) → 러너가 쓰는 가상환경은 그대로 두고 `env -u VIRTUAL_ENV poetry remove yfinance --lock`(Poetry 2.4.1) — `pyproject.toml` 한 줄, `poetry.lock` 68 → 59 패키지(빠짐: `yfinance` 와 그것만 쓰던 `beautifulsoup4` · `cffi` · `curl-cffi` · `frozendict` · `multitasking` · `peewee` · `pycparser` · `soupsieve`, 새로 생김 0, 버전이 바뀐 것 0 — 바꾸기 전 잠금 파일을 scratchpad 에 떠서 대조). 지금 상태를 적는 문서 둘(quant 루트 `CLAUDE.md` 주요 라이브러리 · `README.md` 기술 스택)에서 뺌, 연구 보고서 · 계획서의 언급은 그때의 기록이라 둠. 가상환경에서 지우는 `poetry sync` 는 러너가 끝난 뒤
 - 2026-11-11 13:52: **Phase 3 완료.** 러너 넷 모두 종료 코드 0, ERROR · WARNING 줄 0 — 단일 13:33:44 ~ 13:33:52 · 워크포워드 ~ 13:47:41 · 고원 ~ 13:48:33 · 포트폴리오 ~ 13:48:48. **quant `poetry sync` 가 알린 9개보다 더 지움** — 잠금 파일 밖에 있던 가상환경 패키지(보인 출력 끝 14줄에 `pyasn1-modules` · `pyjwt` · `pyluach` · `python-dotenv` · `rich` · `smmap` · `toolz` · `tornado` · `watchdog` 등. 출력 앞부분을 남기지 않아 전체 목록은 다시 볼 수 없음)까지 지웠다. 잠금 파일 밖 패키지를 따지지 않고 `poetry install` 대신 `sync` 를 쓴 실수. 확인: `pip check` 깨진 의존성 없음, 가상환경 59개 = 잠금 파일 59개, quant 코드(`src` · `scripts` · `tests` · `validate_project.py`)가 import 하는 서드파티 6개(`lightweight_charts_v5` · `numpy` · `pandas` · `plotly` · `pytest` · `streamlit`) 모두 설치됨 — 지운 것은 잠금 파일에 없고 quant 코드도 쓰지 않던 것. **결과 대조**(scratchpad `compare_results.py`, 기준 895 ↔ 전환 뒤 889, 빠진 6개는 quant-data 로 옮긴 `proxy_validation`): 바이트 같음 858 · JSON 경로 필드만 다름 61개(19파일 — 모두 `*_synthetic_max.csv` → `*_synthetic.csv`) · 경로 밖 차이 12개 = 고원 CSV 12개(`param_plateau_*` — 예 QQQ ma=50 CAGR 10.46 → 10.33, 거래 52 → 53). 원인 가름: 고원 결과의 마지막 커밋 `58c1110`(2026-11-05)이 시세 갱신 커밋 `243cb1f`(2026-11-08)보다 앞 — quant HEAD 를 `git archive` 로 scratchpad 에 풀어 전환 전 코드 · 전환 전 데이터로 고원을 다시 돌리니 전환 뒤 결과와 16개 파일 모두 바이트 같음 → **옮기다 생긴 차이 0, 커밋된 고원 결과가 낡았던 것**(quant 커밋 diff 의 고원 변경은 11-08 시세 반영분). AppTest(scratchpad `apptest_dashboards.py`) 대시보드 4종 예외 0 · 오류 블록 0. quant 작업 트리: 삭제 58 · 수정 43(결과 31 포함) · 새 파일 10(합성 8 · 목록 · 판 요약). 다음은 Phase 4 — 착수 전 측정 둘(국내 공식 등락률 · Q31 짝 후보)과 Q31 결정 확인이 먼저
+- 2026-11-11 14:24: 사용자 「다른 세션에서 이어서 할 수 있도록 인계서 작성」 → 둘 자리를 물음(전역 「인계 문서를 두지 않는다」 · 이 계획서 비목표와 어긋나서) → 사용자 「계획서 8장에 넣는다」. 8장에 「인계」 절(세션 ID · scratchpad · 진행 상황 · 작업 트리 · 결정 · 미결 · 다음 할 일)을 더함. 그사이 사용자가 quant-data 를 커밋함(`ae0e12c init`, 99개 파일), quant 는 커밋 전
+- 2026-11-11 14:28: 사용자 「다음 세션에서 quant 쪽 수정분 커밋하기 전 검증과 테스트 · 커밋 메시지 추천도 진행할 수 있게」 → Phase 3 끝에 「quant 커밋 준비」 체크박스 6개와 「Commit Messages (Phase 3 — quant)」 절(`/impl-plan` 「사용자가 중간 커밋 분리를 명시적으로 요청한 경우」)을 더하고, 인계 절에 「먼저 할 일」로 둠 — 다음 세션의 첫 미완료 체크박스가 이것이 된다. 확인한 사실: quant 의 계획서 12개는 모두 ✅ Done 이라 `/commit` 10번(진행 중 계획서의 최종 후보 절 채우기)이 quant 쪽에서 채울 곳이 없다 · quant 커밋 이력은 `기능명 / 요약` 형식이고 quant `CLAUDE.md` 에 따로 정한 커밋 형식은 없다 · quant `plan-config` 의 검증은 `poetry run python validate_project.py`, 포맷은 `poetry run black .`
+- 2026-11-11 14:40: 새 세션(작업 디렉터리 quant-data)에서 인계의 「먼저 할 일」부터. 상태 확인 — quant-data HEAD `ae0e12c` · 바뀐 것은 이 계획서뿐, quant 는 삭제 58 · 수정 43 · 새 파일 10(인계와 같음), quant 코드 diff(src · tests · scripts) 34파일 +57 / −10,752. quant 문서의 낡은 줄을 `.md` 만 다시 셈(인계의 수는 `.md` 밖 · 중복 포함 — 예 `_synthetic_max` 126 → `.md` 82): 지금 상태를 말하는 문서 9개(루트 `CLAUDE.md` 9 · `docs/COMMANDS.md` 16 · `src/qbt/utils/CLAUDE.md` 7 · `src/qbt/CLAUDE.md` 5 · `scripts/CLAUDE.md` 3 · `README.md` 2 · `src/qbt/backtest/CLAUDE.md` 1 · `tests/CLAUDE.md` 1 · `docs/DEFERRED_FINDINGS.md` 2건) / 그때의 기록(Done 계획서 12 · `전략_검증_보고서.md` 24줄 — 고치지 않음) / Q15 몫(`합성_시세_연장.md` 와 그것을 가리키는 49줄 — Phase 5). 결정 질문 셋에 사용자 「추천대로 진행」: **① 지금 상태를 말하는 문서 9개를 이번 quant 커밋에 고침**(Q15 는 Phase 5, quant-data 로 옮긴 코드의 규칙 — 추적 오차 4자리 · 월별 금리 6자리 등 — 은 quant-data `CLAUDE.md` 로 함께 옮김) · **② quant 미룬 지적 2건(`resolve_cutoff_date` — GC=F · 뮤추얼펀드 5종)은 quant-data `docs/DEFERRED_FINDINGS.md` 를 만들어 옮김**(대상 6종이 `catalog.py` 에서 고정이라 지금은 받지 않지만, 표의 상수 하나로 닿음 — `review.md` 「판정할 수 없으면 옮긴다」) · **③ 리뷰는 `review.md` 의 다른 저장소 방식**(quant diff 를 맥락 없는 `general-purpose` 서브에이전트에 — 이 세션은 quant-data 에서 시작해 `/code-review` 가 quant 를 보지 못함 `review.md` 실측 2026-10-04), 순서는 리뷰 → 포맷 → 품질 검증(`review.md` 「코드 리뷰는 품질 검증 «앞»에」 — 체크박스 문구는 그대로)
+- 2026-11-11 14:47: 다시 내보내기 — `python3 scripts/export.py --to ../quant/storage/stock`(파이썬 3.12.13) 종료 코드 0, 8개 복사, quant `quant_data_edition.json` 의 커밋 `ae0e12cf80e0e3bbb10b051cf070ae4c3ec3cc17` · 커밋 안 된 변경 `[]` · 기준일 2026-11-06, 합성 8개 모두 quant-data 원본과 `cmp` 같음. quant 문서 고침(① — 각 파일을 `Read` 로 연 뒤): 루트 `CLAUDE.md`(디렉터리 구조 · 「스크립트 실행 규칙」의 `download_data.py` 두 항목 → 「시세는 quant-data 가 내보낸다 · 그 저장소 `CLAUDE.md` 를 먼저 연다」와 「결과 비교 중에 갱신 · 내보내기를 다시 돌리지 않는다」 · 확장성 경계 · 자릿수 표의 입력 행 → quant-data `ROUND_INPUT_PRICE`, 「전역 자릿수 표의 다른 예외」 절 지움) · `README.md`(관련 저장소에 quant-data, 데이터 수집 줄 → 내보낸 사본을 읽는다, 합성 · 레버리지 소개 두 줄 → quant-data README) · `docs/COMMANDS.md`(워크플로우 1 본문 → quant-data 갱신 · 내보내기를 가리킴(명령은 복제하지 않음), 「시세를 다시 받은 뒤 다시 돌리는 순서」 → ① 시세 받기 · ② 결과 러너, 「데이터 다운로드 옵션」 지움) · `scripts/CLAUDE.md`(데이터 스크립트 지도 → 한 줄) · `src/qbt/CLAUDE.md`(`tqqq/` · 월별 금리 줄, 「시세 파일 이름」 → 내보낸 사본 · `_synthetic` · `_adjusted`, 대용 구간 시가가 진짜 시가가 아니라는 줄을 utils 에서 옮겨 옴) · `src/qbt/utils/CLAUDE.md`(폴더 목적 · 지운 모듈 5줄 · 판정 · 이음매 · 대용 시가 규칙 3줄 — 이음매 · 시가 규칙은 quant-data `proxy_series` docstring 에 있음) · `src/qbt/backtest/CLAUDE.md`(이름 1) · `tests/CLAUDE.md`(TQQQ 시뮬레이션 항목 · softplus · 일일 비용 허용오차 2행(quant 테스트 사용 0) · FFR 날짜 형식 절(quant-data `monthly_data` 가 yyyy-mm 아니면 안내와 함께 `ValueError` — 조용히 틀리지 않아 옮기지 않음) · 「입력 시세」 · 패치 예시 → `qbt.backtest.parameter_stability._PLATEAU_DIR`(테스트에 실제 쓰임)) · `docs/DEFERRED_FINDINGS.md`(두 항목 지움, 머리말만) · `src/qbt/utils/data_loader.py` docstring 의 `tqqq/data_loader.py` 참고 줄(주석). 처음 잰 9개 밖에서 더 찾은 낡은 줄: 루트 `CLAUDE.md` 의 `tqqq` · `etc` 3줄 · `README.md` 수집 줄 · `tests/CLAUDE.md` 의 시뮬레이션 · FFR 항목. 옮기지 않고 지운 것: 추적 오차 표 4자리 규칙(사용자 결정 2026-11-05 — `tracking.csv` 를 Q32 로 굳혀 그 자릿수로 만드는 코드가 없음). quant-data 고침(②): `CLAUDE.md` 「자릿수 — 전역 4자리 규칙의 예외」(시세 6자리 · 월별 금리 6자리) · `README.md`(합성 · 레버리지 소개, 미룬 지적 링크) · `docs/DEFERRED_FINDINGS.md` 새로(quant 머리말 그대로, 두 항목의 자리 · 명령 · 파일 이름을 새 코드로 — `sources/yahoo.py:33` · `:45`, `catalog.py:94-99` 고정 표시, 그 사이 값을 쓰는 곳을 지금 코드로 다시 확인: GC=F 는 검증 표 ①(금 사슬 ↔ GLD)만 · 합성 GLD 는 상장 뒤 실물 행, 펀드는 대용 검증 표(VFINX ↔ SPY · VUSTX ↔ TLT)만 · 펀드 대조 표는 굳힘, `GC=F_adjusted.csv` 6,573행 중 일요일 0). 확인: 지금 상태를 말하는 quant 문서 11개에서 지운 이름 · 경로 검색 0줄, 남은 `합성_시세_연장` 3줄(`scripts` · `src/qbt` · `backtest` 의 `CLAUDE.md`)은 Q15 · Phase 5. 리뷰는 quant diff(수정 925줄 · 삭제 목록 58 · storage 이름 · 잠금 파일 크기)와 quant-data 문서 diff 를 scratchpad `review/` 에 떠서 `general-purpose` 서브에이전트에 줌(읽기 전용, `review.md` 의 무게 · 닿는가 정의를 그대로 줌)
+- 2026-11-11 15:02: 리뷰 1회차 — 서브에이전트가 사용량 한도(429)로 한 번 멈춰 이어 보내 끝냄(그 사이 두 작업 트리는 계획서 말고 바뀌지 않음). **발견 6건 — 버그 0 [무거움 0 · 가벼움 0] · 그 외 6** → `review.md` 의 고칠 것 0, 1회차로 끝. 6건 모두 지금 코드에서 사실 확인: ① quant-data `DEFERRED_FINDINGS.md` GC=F 항목 — 금 선물 행은 미국 달력(VFINX)에 든 날만 사슬에 남아(`gold_proxy.py:423`) GC=F 하나만 고정을 풀면 닿지 않음, VFINX 도 풀어야 함 ② 같은 파일 펀드 항목 — `catalog.py:94-99` 에 GC=F(`:96`)가 끼어 있음 · VFINX 가 금 사슬의 달력이기도 함(`products.py:71`)이 빠짐 ③ quant `COMMANDS.md` 「시세를 다시 받은 뒤」 — 옛 문서의 「덮어쓰지 않은 종목은 옛 끝날에 머물러 결과 끝날도 묶인다」가 사라짐(새 흐름에서는 quant-data `--exclude` 로 같은 상태 — 예 `--exclude QQQ` 면 QQQ 합성은 옛 끝날 · TQQQ 합성은 새 끝날, 겹치는 기간으로 조용히 짧아짐) ④ quant `src/qbt/CLAUDE.md` 「시세 파일 이름」의 `{TICKER}_{가격 기준}.csv` · `^NDX_raw.csv` 예시 — `ticker_from_stock_path` 는 `_synthetic` · `_adjusted` 만 받음 ⑤ quant `data_loader.py:97` 판이 섞였을 때 안내가 「갱신 뒤 내보내기」 — 내보내기만 다시 하면 풀리고, 갱신은 새 데이터를 들임(루트 `CLAUDE.md` 「결과 비교 중 갱신 금지」와 어긋남) ⑥ quant `test_data_loader.py:11` 머리 설명의 「(합성 생성을 건너뜀)」. 서브에이전트가 읽기 전용 python 대조를 한 번 돌렸다고 밝힘(파일 쓰기 없음). quant `black .` 바뀐 파일 0(102개 그대로). quant `validate_project.py` — Ruff 통과 · PyRight 통과 · pytest passed=668 · failed=0 · skipped=0(31초). 「그 외」 처리는 사용자 결정 대기 — `review.md` 는 「그 외」를 고치지 않는데, ① ② ④ 는 이번 변경에서 쓴 글의 사실 오류다
+- 2026-11-11 15:06: 사용자 「추천대로」 → 「그 외」 6건 모두 고침(`review.md` 「그 외는 고치지 않는다」의 사용자 결정 예외 — 버그 수정이 아니라 리뷰 회차는 늘지 않음). ① ② quant-data `DEFERRED_FINDINGS.md` — GC=F 항목의 도달 조건을 「GC=F · VFINX 둘 다 고정을 풀고, 그 시각 VFINX 에 그날 행이 있어야」로(`gold_proxy.py:423` · `products.py:71`, Perth 달러값은 2015-12-31 에 끝나 겹치지 않음), 펀드 항목의 자리를 `catalog.py:94-95` · `:97-99` 로 · VFINX 달력은 날짜만 쓰여 닿지 않음을 더함 ③ quant `COMMANDS.md` ① 에 `--exclude` 로 뺀 종목의 옛 끝날 경고를 되살림(예 QQQ — `buffer_zone.py:82-83` 의 QQQ 신호 · TQQQ 매매) ④ quant `src/qbt/CLAUDE.md` 「시세 파일 이름」 — 「이름은 아래 둘만 읽는다 — 그 밖은 `ticker_from_stock_path` 가 ValueError」, 예시에서 `^NDX_raw.csv` 뺌 ⑤ quant `data_loader.py` 안내 → 「내보내기를 다시 한 뒤 실행 — 갱신까지 하면 새 데이터가 함께 들어온다」(테스트의 `match` 는 `2023-01-04.*2023-01-05.*quant-data` 라 그대로 맞음) ⑥ quant `test_data_loader.py` 머리 설명 7번 · 그 테스트의 Then 줄. 다시 돌림: quant `black .` 바뀐 파일 0, `validate_project.py` Ruff 통과 · PyRight 통과 · pytest passed=668 · failed=0 · skipped=0
+- 2026-11-11 15:07: quant 변경을 대상으로 `/commit`(staged 0 → unstaged + untracked 전체: 삭제 58 · 수정 50 · 새 파일 10). quant `CLAUDE.md` 에 커밋 형식 규정 없음 → `기능명 / 요약`. diff 를 파일별로 읽음 — src 2 · tests 6 · `pyproject.toml` · 문서 9 · 결과(경로 필드만 바뀐 `summary.json` 19 · 고원 CSV 12 · 지운 `proxy_validation` 6). 후보 5개를 「Commit Messages (Phase 3 — quant)」에 옮김(최종 후보 절이 아니라 — 이 절의 머리 설명대로). 무관한 덩어리로 고원 CSV 12개(11-08 시세 반영분, 진행 로그 13:52)를 사용자에게 알리고 분리 여부를 물음. **quant 커밋 준비 끝** — 커밋은 사용자(quant · quant-data 둘 다). 다음은 Phase 4(인계 「다음 할 일」)
+- 2026-11-11 15:10: 사용자가 quant 를 커밋 — `9530ce9 데이터 / 시세 받기 · 합성을 quant-data 로 이관`(후보 1, 고원 CSV 를 나누지 않은 한 커밋 · 110개 파일), quant 작업 트리 깨끗함. quant 판 요약의 quant-data 커밋은 `ae0e12c`. quant-data 는 커밋 전 — `CLAUDE.md` · `README.md` · `docs/DEFERRED_FINDINGS.md`(새로) · 이 계획서
+- 2026-11-11 15:11: 사용자 「커밋메시지 후보 만들어줘」(quant-data) → `/commit`(staged 0 → unstaged 3 + untracked 1 전체, quant-data `CLAUDE.md` 에 커밋 형식 규정 없음). 중간 커밋이라 최종 후보 절이 아니라 「Commit Messages (Phase 3 — quant-data)」를 더해 후보 5개를 옮김(`/impl-plan` 「사용자가 중간 커밋 분리를 명시적으로 요청한 경우」)
