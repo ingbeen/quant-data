@@ -3,10 +3,10 @@ new_days 모듈 테스트 — 새로 붙는 날 검사 (판정 규칙 ②) 와 �
 
 이 파일은 무엇을 검증하나요?
 1. 새로 붙는 날은 기존 끝날 뒤의 날뿐이고, 기존 파일이 없으면 없는가? (결정 Q29 · Q34)
-2. 미국: 대상 하루 수익률 − 배율 × 짝 하루 수익률이 배율 × 1%p 를 넘는 날만 걸리는가? (결정 Q29 · Q30)
-3. 짝이 없는 금 · 장기채: 하루 변동이 임시 한도(50%) 이상인 날이 걸리는가? (결정 Q27)
-4. 국내: KRX 원본가 ↔ 야후 원본가가 1원이라도 다르면 걸리고, 야후에 그날이 없으면 건너뛰는가?
-5. 국내: KRX 원본가 하루 변화 ↔ KRX 공식 등락률이 표기 자릿수의 반 단위를 넘으면 걸리고, 국내 분할 기록이 있으면 통과하는가?
+2. 미국: 대상 하루 수익률 − 배율 × 짝 하루 수익률이 배율 × 1%p 를 넘는 날만 걸리는가? (결정 Q29 · Q30 · Q31)
+3. 국내: KRX 원본가 ↔ 야후 원본가가 1원이라도 다르면 걸리고, 야후에 그날이 없으면 건너뛰는가?
+4. 국내: 기준가가 바뀐 날의 「종가 ÷ 기준가 − 1」이 공식 등락률과 반 단위 밖이면 걸리는가? (KRX 자료끼리 — 결정 Q14)
+5. 비트코인: Bitstamp 종가 ↔ Coin Metrics 기준가 차이가 5% 를 넘거나 그날 기준가가 없으면 걸리는가?
 6. 패스 목록이 모든 칸(종목 · 날짜 · 검사 · 사유 · 근거)을 갖춘 줄만 받고, 같은 종목 · 날짜 · 검사의 실패만 놓아주는가?
 
 왜 중요한가요?
@@ -21,17 +21,26 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant_data.constants import COL_CHANGE_RATE, COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN, COL_VOLUME
+from quant_data.constants import (
+    COL_BASE_PRICE,
+    COL_CHANGE_RATE,
+    COL_CLOSE,
+    COL_DATE,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_VALUE,
+    COL_VOLUME,
+)
 from quant_data.new_days import (
-    OFFICIAL_RATE_DECIMALS,
+    COIN_TWO_SOURCES_TOLERANCE,
     PAIR_TOLERANCE_PER_LEVERAGE,
-    TEMP_DAILY_MOVE_LIMIT,
     Check,
     NewDayFailure,
     PassEntry,
     appended_days,
-    check_daily_move,
-    check_kr_official_rate,
+    check_coin_two_sources,
+    check_kr_base_rate,
     check_kr_two_sources,
     check_pair,
     load_pass_list,
@@ -55,12 +64,20 @@ def _prices(closes: list[float], dates: list[date] | None = None) -> pd.DataFram
     )
 
 
-def _krx(closes: list[int], rates: list[float], dates: list[date] | None = None) -> pd.DataFrame:
-    """KRX 원본가 — 원 단위 정수 가격과 공식 등락률(%, pykrx 반환 그대로)."""
+def _krx(
+    closes: list[int], rates: list[float], dates: list[date] | None = None, bases: list[int] | None = None
+) -> pd.DataFrame:
+    """KRX 원본가 — 원 단위 정수 가격, 기준가(주지 않으면 전날 종가 · 첫 행은 자기 종가), 공식 등락률(%, KRX 표기 그대로)."""
     frame = _prices([float(c) for c in closes], dates)
     frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]] = frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]].astype("int64")
+    frame[COL_BASE_PRICE] = bases if bases is not None else [closes[0], *closes[:-1]]
     frame[COL_CHANGE_RATE] = rates
     return frame
+
+
+def _value_series(values: list[float], dates: list[date] | None = None) -> pd.DataFrame:
+    """하루 한 값 계열 (Coin Metrics 기준가 등)."""
+    return pd.DataFrame({COL_DATE: dates if dates is not None else DAYS[: len(values)], COL_VALUE: values})
 
 
 class TestAppendedDays:
@@ -190,46 +207,6 @@ class TestCheckPair:
         assert "짝" in failures[0].detail and "없" in failures[0].detail
 
 
-class TestCheckDailyMove:
-    """짝이 없는 금 · 장기채의 임시 검사 — 하루 변동이 한도 이상이면 걸린다 (Q27)"""
-
-    @pytest.mark.parametrize(
-        ("close", "fails"),
-        [(149.0, False), (151.0, True), (51.0, False), (49.0, True)],
-        ids=["up_49", "up_51", "down_49", "down_51"],
-    )
-    def test_limit_both_directions(self, close: float, fails: bool) -> None:
-        """
-        목적: 하루 변동의 절대값이 한도(50%) 이상인 날만 걸린다 — 오르든 내리든
-
-        Given: 100 → close
-        When: check_daily_move(한도 TEMP_DAILY_MOVE_LIMIT, 새로 붙는 날 = 둘째 날)
-        Then: ±49% 는 통과, ±51% 는 하루 변동 실패
-        """
-        # Given
-        target = _prices([100.0, close])
-
-        # When
-        failures = check_daily_move(target, ticker="GLD", days=[DAYS[1]], limit=TEMP_DAILY_MOVE_LIMIT)
-
-        # Then
-        assert [f.check for f in failures] == ([Check.DAILY_MOVE] if fails else [])
-
-    def test_past_rows_are_not_checked(self) -> None:
-        """
-        목적: 넘긴 날만 본다 — 과거의 큰 하루 변동으로는 멈추지 않는다
-
-        Given: 둘째 날 +90%(과거), 셋째 날 +1%, 새로 붙는 날 = 셋째 날
-        When: check_daily_move
-        Then: 실패 없음
-        """
-        # Given
-        target = _prices([100.0, 190.0, 191.9])
-
-        # When & Then
-        assert check_daily_move(target, ticker="GLD", days=[DAYS[2]], limit=TEMP_DAILY_MOVE_LIMIT) == []
-
-
 class TestCheckKrTwoSources:
     """국내 KRX 원본가 ↔ 야후 원본가 — 완전 일치(원 단위), 야후에 그날이 없으면 건너뜀"""
 
@@ -271,7 +248,7 @@ class TestCheckKrTwoSources:
     def test_missing_yahoo_day_is_skipped(self, yahoo_close: float | None) -> None:
         """
         목적: 야후에 그날이 없거나 가격이 빈 행이면 건너뛴다 — 야후는 KRX 에 있는 날을 빠뜨리고(069500 567일),
-              빈 가격 행(거래량 0)을 주기도 한다. 그날은 공식 등락률 대조만 한다
+              빈 가격 행(거래량 0)을 주기도 한다. 그날은 KRX 자료끼리의 대조만 한다
 
         Given: 둘째 날 KRX 35,500, 야후는 그날 행이 없거나 가격이 비었음
         When: check_kr_two_sources
@@ -288,85 +265,113 @@ class TestCheckKrTwoSources:
         assert check_kr_two_sources(krx, yahoo, ticker="069500", days=DAYS[:2]) == []
 
 
-class TestCheckKrOfficialRate:
-    """국내 KRX 원본가 하루 변화 ↔ KRX 공식 등락률 — 표기 자릿수의 반 단위, 국내 분할 기록이면 그 비율을 넣어 견줌"""
+class TestCheckKrBaseRate:
+    """국내 KRX 자료끼리 — 기준가가 바뀐 날의 「종가 ÷ 기준가 − 1」 ↔ 공식 등락률, 표기 자릿수(2자리)의 반 단위"""
 
-    HALF_UNIT = 0.5 * 10.0**-OFFICIAL_RATE_DECIMALS  # 등락률(%)의 반 단위
-
-    def test_rounded_official_rate_passes(self) -> None:
+    def test_unchanged_base_day_is_not_checked(self) -> None:
         """
-        목적: 공식 등락률이 원본가 하루 변화를 표기 자릿수로 반올림한 값이면 통과한다
+        목적: 공식 등락률이 원본가 하루 변화와 맞는 날(기준가 = 전날 종가)은 기준가 칸을 보지 않는다 — 2005년 069500 의
+              대비만 어긋난 4일이 멈추지 않는다
 
-        Given: 10,000 → 10,123 (+1.23%), 공식 등락률 = 그 값을 표기 자릿수로 반올림
-        When: check_kr_official_rate(둘째 날)
+        Given: 10,000 → 10,123, 공식 등락률 = 하루 변화의 2자리, 기준가 칸은 10,010 (대비 오기)
+        When: check_kr_base_rate(둘째 날)
         Then: 실패 없음
         """
         # Given
-        change = (10123 / 10000 - 1) * 100
-        krx = _krx([10000, 10123], [0.0, round(change, OFFICIAL_RATE_DECIMALS)])
+        krx = _krx([10000, 10123], [0.0, round((10123 / 10000 - 1) * 100, 2)], bases=[10000, 10010])
 
         # When & Then
-        assert check_kr_official_rate(krx, ticker="069500", days=[DAYS[1]], split_ratios={}) == []
+        assert check_kr_base_rate(krx, ticker="069500", days=[DAYS[1]]) == []
 
-    def test_difference_beyond_half_unit_fails(self) -> None:
+    def test_distribution_day_consistent_with_base_passes(self) -> None:
         """
-        목적: 반올림의 반 단위를 넘게 어긋나면 걸린다 — 기준가가 전날 종가가 아닌 날(분할 · 병합 등 액션)을 찾는다
+        목적: 분배락일(기준가가 내려간 날)은 그 기준가로 낸 등락률이 공식 등락률과 맞으면 통과한다 — 착수 전 측정 ① 의
+              80일이 모두 이 모양이었다
 
-        Given: 10,000 → 10,123, 공식 등락률 = 하루 변화 + 반 단위의 3배
-        When: check_kr_official_rate
-        Then: 공식 등락률 실패 하나
+        Given: 전날 32,105 → 32,245, 기준가 32,035 (70원 분배), 공식 등락률 0.66 (= 32,245 ÷ 32,035 − 1)
+        When: check_kr_base_rate
+        Then: 실패 없음
         """
         # Given
-        change = (10123 / 10000 - 1) * 100
-        krx = _krx([10000, 10123], [0.0, change + 3 * self.HALF_UNIT])
+        krx = _krx([32105, 32245], [0.0, 0.66], bases=[32105, 32035])
+
+        # When & Then
+        assert check_kr_base_rate(krx, ticker="069500", days=[DAYS[1]]) == []
+
+    def test_base_inconsistent_with_official_rate_fails(self) -> None:
+        """
+        목적: 기준가가 바뀐 날인데 그 기준가로 낸 등락률이 공식 등락률과 반 단위 밖이면 걸린다 — KRX 의 대비 · 등락률이
+              서로 맞지 않으면 수정주가를 만들 기준가를 믿을 수 없다
+
+        Given: 전날 32,105 → 32,245, 기준가 32,000, 공식 등락률 0.66 (32,245 ÷ 32,000 − 1 = +0.77%)
+        When: check_kr_base_rate
+        Then: 그날 기준가 등락률 실패 하나
+        """
+        # Given
+        krx = _krx([32105, 32245], [0.0, 0.66], bases=[32105, 32000])
 
         # When
-        failures = check_kr_official_rate(krx, ticker="069500", days=[DAYS[1]], split_ratios={})
+        failures = check_kr_base_rate(krx, ticker="069500", days=[DAYS[1]])
 
         # Then
-        assert [(f.day, f.check) for f in failures] == [(DAYS[1], Check.KR_OFFICIAL_RATE)]
-
-    def test_split_day_fails_without_record(self) -> None:
-        """
-        목적: 분할 날은 원본가가 가짜로 급락해 걸린다 — KRX 원본가는 분할을 과거에 반영하지 않는다
-
-        Given: 2:1 분할 날 20,000 → 10,050, 공식 등락률 +0.50%
-        When: check_kr_official_rate(분할 기록 없음)
-        Then: 실패 하나
-        """
-        # Given
-        krx = _krx([20000, 10050], [0.0, 0.5])
-
-        # When & Then
-        assert len(check_kr_official_rate(krx, ticker="069500", days=[DAYS[1]], split_ratios={})) == 1
-
-    def test_split_day_passes_with_record(self) -> None:
-        """
-        목적: 국내 분할 기록에 그날 비율이 있으면 그 비율을 넣은 하루 변화로 견줘 통과한다 — 사람이 공시를 확인해 적는 탈출구
-
-        Given: 같은 분할 날, 분할 기록 {그날: 2.0}
-        When: check_kr_official_rate
-        Then: 실패 없음 (20,000 ÷ 2 = 10,000 → 10,050 은 +0.50%)
-        """
-        # Given
-        krx = _krx([20000, 10050], [0.0, 0.5])
-
-        # When & Then
-        assert check_kr_official_rate(krx, ticker="069500", days=[DAYS[1]], split_ratios={DAYS[1]: 2.0}) == []
+        assert [(f.day, f.check) for f in failures] == [(DAYS[1], Check.KR_BASE_RATE)]
 
     def test_first_row_is_skipped(self) -> None:
         """
-        목적: 앞 행이 없는 첫 행은 하루 변화가 없어 건너뛴다 (경계) — 첫 판은 전 기간에 걸므로(Q34) 첫 행이 늘 들어온다
+        목적: 앞 행이 없는 첫 행은 건너뛴다 (경계) — 첫 판은 전 기간에 걸므로(Q34) 첫 행이 늘 들어온다
 
-        Given: 한 행, 넘긴 날 = 그 행
-        When: check_kr_official_rate
+        Given: 한 행, 공식 등락률 3.0 (상장 첫날 공모가 대비 등)
+        When: check_kr_base_rate
         Then: 실패 없음
         """
         # Given
         krx = _krx([10000], [3.0])
 
         # When & Then
-        assert check_kr_official_rate(krx, ticker="069500", days=[DAYS[0]], split_ratios={}) == []
+        assert check_kr_base_rate(krx, ticker="069500", days=[DAYS[0]]) == []
+
+
+class TestCheckCoinTwoSources:
+    """비트코인 Bitstamp 종가 ↔ Coin Metrics 기준가 — 차이 5% 를 넘으면 걸림 (결정 Q6)"""
+
+    @pytest.mark.parametrize(("ratio", "fails"), [(1.049, False), (0.951, False), (1.051, True), (0.949, True)])
+    def test_tolerance_both_directions(self, ratio: float, fails: bool) -> None:
+        """
+        목적: 차이율 = Bitstamp ÷ Coin Metrics − 1 의 절대값이 5% 를 넘을 때만 걸린다 (경계, 방향 무관) — verify-lab 이
+              두 출처 대조에 쓰던 목록 경계 그대로다
+
+        Given: Coin Metrics 100, Bitstamp 100 × ratio
+        When: check_coin_two_sources(그날)
+        Then: ±4.9% 통과, ±5.1% 는 두 출처 차이 실패
+        """
+        # Given
+        target = _prices([100.0 * ratio])
+        pair = _value_series([100.0])
+
+        # When
+        failures = check_coin_two_sources(target, pair, ticker="BTCUSD", pair_name="BTC_PriceUSD", days=[DAYS[0]])
+
+        # Then
+        assert COIN_TWO_SOURCES_TOLERANCE == 0.05
+        assert [f.check for f in failures] == ([Check.COIN_TWO_SOURCES] if fails else [])
+
+    def test_missing_pair_day_fails(self) -> None:
+        """
+        목적: Coin Metrics 에 그날 값이 없으면 견줄 수 없어 실패로 보인다 — 건너뛰면 대조 없이 새 날짜가 들어온다
+
+        Given: Bitstamp 두 날, Coin Metrics 첫날만
+        When: check_coin_two_sources(둘째 날)
+        Then: 실패 하나, 설명에 「없」
+        """
+        # Given
+        target = _prices([100.0, 101.0])
+        pair = _value_series([100.0])
+
+        # When
+        failures = check_coin_two_sources(target, pair, ticker="BTCUSD", pair_name="BTC_PriceUSD", days=[DAYS[1]])
+
+        # Then
+        assert len(failures) == 1 and "없" in failures[0].detail
 
 
 PASS_LIST_HEADER = "종목,날짜,검사,사유,근거"
@@ -384,7 +389,7 @@ class TestLoadPassList:
         """
         목적: 칸을 모두 갖춘 줄을 읽는다 — 한글 머리 · BOM 붙은 CSV
 
-        Given: 두 줄 (짝 차이 · 하루 변동)
+        Given: 두 줄 (짝 차이 · 두 출처 차이)
         When: load_pass_list
         Then: 두 PassEntry
         """
@@ -393,7 +398,7 @@ class TestLoadPassList:
             tmp_path / "pass_list.csv",
             [
                 "QQQ,2020-03-13,짝 차이,코로나 급락 반등,그날 나스닥100 +9.35% · TQQQ 도 함께 넘음",
-                "GLD,2013-04-15,하루 변동,금값 급락,금 선물 같은 날 −9.3%",
+                "BTCUSD,2014-02-24,두 출처 차이,거래소 장애,Coin Metrics 기준가와 −8% · 같은 날 Mt.Gox 거래 중단",
             ],
         )
 
@@ -403,7 +408,13 @@ class TestLoadPassList:
         # Then
         assert entries == [
             PassEntry("QQQ", date(2020, 3, 13), Check.PAIR, "코로나 급락 반등", "그날 나스닥100 +9.35% · TQQQ 도 함께 넘음"),
-            PassEntry("GLD", date(2013, 4, 15), Check.DAILY_MOVE, "금값 급락", "금 선물 같은 날 −9.3%"),
+            PassEntry(
+                "BTCUSD",
+                date(2014, 2, 24),
+                Check.COIN_TWO_SOURCES,
+                "거래소 장애",
+                "Coin Metrics 기준가와 −8% · 같은 날 Mt.Gox 거래 중단",
+            ),
         ]
 
     def test_header_only_is_empty(self, tmp_path: Path) -> None:
@@ -497,14 +508,14 @@ class TestRemainingFailures:
         """
         목적: 종목 · 날짜 · 검사가 모두 같은 실패만 놓아준다 — 같은 날의 다른 검사, 같은 검사의 다른 날은 남는다
 
-        Given: 실패 셋 (QQQ 03-13 짝 차이 · QQQ 03-13 하루 변동 · QQQ 03-12 짝 차이), 패스 목록 (QQQ 03-13 짝 차이)
+        Given: 실패 셋 (QQQ 03-13 짝 차이 · QQQ 03-13 두 출처 차이 · QQQ 03-12 짝 차이), 패스 목록 (QQQ 03-13 짝 차이)
         When: remaining_failures
         Then: 뒤의 둘이 남는다
         """
         # Given
         failures = [
             NewDayFailure("QQQ", DAYS[4], Check.PAIR, "차이"),
-            NewDayFailure("QQQ", DAYS[4], Check.DAILY_MOVE, "변동"),
+            NewDayFailure("QQQ", DAYS[4], Check.COIN_TWO_SOURCES, "차이"),
             NewDayFailure("QQQ", DAYS[3], Check.PAIR, "차이"),
         ]
         entries = [PassEntry("QQQ", DAYS[4], Check.PAIR, "사유", "근거")]

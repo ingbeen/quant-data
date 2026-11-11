@@ -1,15 +1,15 @@
 """새로 붙는 날 검사 (판정 규칙 ②) 와 패스 목록
 
 과거 행은 판정 규칙 ①(revision)의 상대 2e-5 가 지키고, 이 모듈은 기존 끝날 뒤에 새로 붙는 날만 본다(결정 Q29).
-- 미국: 대상 하루 수익률 − 배율 × 짝 하루 수익률, 기준 배율 × 1%p (결정 Q30)
-- 짝이 없는 금 · 장기채: 하루 변동 임시 한도 (결정 Q27)
-- 국내: KRX 원본가 ↔ 야후 원본가 완전 일치, KRX 원본가 하루 변화 ↔ KRX 공식 등락률
+- 미국: 대상 하루 수익률 − 배율 × 짝 하루 수익률, 기준 배율 × 1%p (결정 Q30 · Q31 — 금 · 장기채는 같은 자산의 다른 ETF)
+- 국내: KRX 원본가 ↔ 야후 원본가 완전 일치, 기준가가 바뀐 날의 「종가 ÷ 기준가 − 1」 ↔ KRX 공식 등락률 (결정 Q14)
+- 비트코인: Bitstamp 종가 ↔ Coin Metrics 기준가 차이 5%
 기준을 넘은 날은 저장을 막지 않고 실패로 모은다 — 갱신이 멈추고, 실제 대폭락 · 대폭등이면 패스 목록에 근거와 함께
 적은 뒤 다시 실행한다(결정 Q26). 패스 목록은 사람과 AI 가 적는다.
 """
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
@@ -18,15 +18,13 @@ from typing import Final
 
 import pandas as pd
 
-from quant_data.constants import COL_CHANGE_RATE, COL_CLOSE, COL_DATE
+from quant_data.constants import COL_BASE_PRICE, COL_CHANGE_RATE, COL_CLOSE, COL_DATE, COL_VALUE
+from quant_data.domestic import is_base_changed, official_rate_matches_base
 from quant_data.record_files import parse_iso_date, read_record_rows
 
 PAIR_TOLERANCE_PER_LEVERAGE: Final = 0.01  # 배율 1 당 짝 차이 기준 (0.01 = 1%p)
-# 짝이 정해지기 전의 금 · 장기채만 — quant 의 저장 거부 기준을 옮긴 값이고 근거 기록은 없다(결정 Q27)
-TEMP_DAILY_MOVE_LIMIT: Final = 0.5  # 비율 (0.5 = 50%)
-# KRX 공식 등락률(%)의 표기 자릿수 — Phase 4 착수 전 측정에서 확인해 고친다
-OFFICIAL_RATE_DECIMALS: Final = 2
-_COMPARE_EPSILON: Final = 1e-9  # 반 단위 경계의 부동소수점 잡음
+# verify-lab 이 두 출처 대조에 쓰던 목록 경계 그대로 — 새로 고른 숫자가 아니다(사용자 결정 2026-11-11)
+COIN_TWO_SOURCES_TOLERANCE: Final = 0.05  # 비율 (0.05 = 5%)
 
 PASS_LIST_COLUMNS: Final = ("종목", "날짜", "검사", "사유", "근거")
 
@@ -35,9 +33,9 @@ class Check(Enum):
     """새로 붙는 날 검사 — 값은 패스 목록의 「검사」 칸에 적는 이름."""
 
     PAIR = "짝 차이"
-    DAILY_MOVE = "하루 변동"
     KR_TWO_SOURCES = "두 출처 일치"
-    KR_OFFICIAL_RATE = "공식 등락률"
+    KR_BASE_RATE = "기준가 등락률"
+    COIN_TWO_SOURCES = "두 출처 차이"
 
 
 @dataclass(frozen=True)
@@ -123,33 +121,12 @@ def check_pair(
     return failures
 
 
-def check_daily_move(target: pd.DataFrame, *, ticker: str, days: Sequence[date], limit: float) -> list[NewDayFailure]:
-    """
-    하루 변동의 절대값이 limit 이상인 날 (limit 은 비율, 0.5 = 50%).
-
-    Raises:
-        ValueError: days 에 시세 밖의 날이 있을 때
-    """
-    closes = _closes(target)
-    dates = list(closes)
-    failures: list[NewDayFailure] = []
-    for day in days:
-        previous = _previous_day(dates, day, ticker)
-        if previous is None:
-            continue
-        move = closes[day] / closes[previous] - 1
-        if abs(move) >= limit:
-            detail = f"하루 변동 {move:+.2%} (임시 한도 {limit:.0%})"
-            failures.append(NewDayFailure(ticker, day, Check.DAILY_MOVE, detail))
-    return failures
-
-
 def check_kr_two_sources(
     krx_raw: pd.DataFrame, yahoo_raw: pd.DataFrame, *, ticker: str, days: Sequence[date]
 ) -> list[NewDayFailure]:
     """
     KRX 원본가 종가 ↔ 야후 원본가 종가가 원 단위로 다른 날. 야후에 그날이 없거나 가격이 빈 행이면 건너뛴다 —
-    그날은 공식 등락률 대조만 한다.
+    그날은 KRX 자료끼리의 대조(check_kr_base_rate)만 한다.
 
     Raises:
         ValueError: days 에 KRX 시세 밖의 날이 있을 때
@@ -171,36 +148,63 @@ def check_kr_two_sources(
     return failures
 
 
-def check_kr_official_rate(
-    krx_raw: pd.DataFrame,
-    *,
-    ticker: str,
-    days: Sequence[date],
-    split_ratios: Mapping[date, float],
-) -> list[NewDayFailure]:
+def check_kr_base_rate(krx_raw: pd.DataFrame, *, ticker: str, days: Sequence[date]) -> list[NewDayFailure]:
     """
-    KRX 원본가 하루 변화 ↔ KRX 공식 등락률이 표기 자릿수의 반 단위를 넘게 어긋난 날 — 기준가가 전날 종가가 아닌 날
-    (분할 · 병합 등 액션)을 찾는다. 국내 분할 기록에 그날 비율(주식 수 배수)이 있으면 전날 종가 ÷ 비율을 기준으로 견준다.
+    기준가가 바뀐 날(공식 등락률이 원본가 하루 변화와 반 단위 밖)에 「종가 ÷ 기준가 − 1」이 공식 등락률과 반 단위 밖이면
+    걸린다 — KRX 의 대비 · 등락률이 서로 맞지 않으면 국내 수정주가를 만들 기준가를 믿을 수 없다. 바뀌지 않은 날은 기준가
+    칸을 보지 않는다(대비만 어긋난 날).
 
     Raises:
         ValueError: days 에 시세 밖의 날이 있을 때
     """
     closes = _closes(krx_raw)
+    bases = dict(zip(krx_raw[COL_DATE], krx_raw[COL_BASE_PRICE].astype(float), strict=True))
     rates = dict(zip(krx_raw[COL_DATE], krx_raw[COL_CHANGE_RATE].astype(float), strict=True))
     dates = list(closes)
-    half_unit = 0.5 * 10.0**-OFFICIAL_RATE_DECIMALS
     failures: list[NewDayFailure] = []
     for day in days:
         previous = _previous_day(dates, day, ticker)
-        if previous is None:
+        if previous is None or not is_base_changed(closes[previous], closes[day], rates[day]):
             continue
-        ratio = split_ratios.get(day, 1.0)
-        change = (closes[day] * ratio / closes[previous] - 1) * 100
-        if abs(change - rates[day]) > half_unit + _COMPARE_EPSILON:
-            detail = f"원본가 하루 변화 {change:+.4f}% · 공식 등락률 {rates[day]:+.2f}%"
-            if ratio != 1.0:
-                detail += f" (국내 분할 기록 비율 {ratio:g})"
-            failures.append(NewDayFailure(ticker, day, Check.KR_OFFICIAL_RATE, detail))
+        if not official_rate_matches_base(closes[day], bases[day], rates[day]):
+            implied = (closes[day] / bases[day] - 1) * 100 if bases[day] > 0 else math.nan
+            detail = (
+                f"기준가 {bases[day]:,.0f}원으로 낸 등락률 {implied:+.4f}% · 공식 등락률 {rates[day]:+.2f}% "
+                f"(전날 종가 {closes[previous]:,.0f}원 · 종가 {closes[day]:,.0f}원)"
+            )
+            failures.append(NewDayFailure(ticker, day, Check.KR_BASE_RATE, detail))
+    return failures
+
+
+def check_coin_two_sources(
+    target: pd.DataFrame,
+    pair: pd.DataFrame,
+    *,
+    ticker: str,
+    pair_name: str,
+    days: Sequence[date],
+    tolerance: float = COIN_TWO_SOURCES_TOLERANCE,
+) -> list[NewDayFailure]:
+    """
+    Bitstamp 종가 ÷ Coin Metrics 기준가 − 1 의 절대값이 tolerance(비율)를 넘거나 그날 기준가가 없는 날.
+
+    Raises:
+        ValueError: days 에 대상 시세 밖의 날이 있을 때
+    """
+    closes = _closes(target)
+    values = dict(zip(pair[COL_DATE], pair[COL_VALUE].astype(float), strict=True))
+    failures: list[NewDayFailure] = []
+    for day in days:
+        if day not in closes:
+            raise ValueError(f"{ticker} 시세에 검사할 날 {day} 가 없습니다")
+        reference = values.get(day)
+        if reference is None:
+            failures.append(NewDayFailure(ticker, day, Check.COIN_TWO_SOURCES, f"{pair_name} 에 {day} 값이 없어 견줄 수 없음"))
+            continue
+        difference = closes[day] / reference - 1
+        if abs(difference) > tolerance:
+            detail = f"종가 {closes[day]:,.2f} · {pair_name} {reference:,.2f} — 차이 {difference:+.2%} (기준 {tolerance:.0%})"
+            failures.append(NewDayFailure(ticker, day, Check.COIN_TWO_SOURCES, detail))
     return failures
 
 

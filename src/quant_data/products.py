@@ -6,12 +6,13 @@
 2. 레버리지 합성 (leveraged.constants.LEVERAGED_SYNTHETIC_TARGETS): 저장할 값(6자리)으로 반올림한 1배 합성을 상장일까지
    굴려 잇는다
 3. 검증 ④ 가정만 바꾼 판. ② 추적 · ③ 펀드 대조는 고정 시점 기록이라 만들지 않는다(결정 Q32)
+4. 국내 수정주가(C-2): 표의 국내 ETF 마다 KRX 원본가 · 야후 분배 기록으로 `_adjusted` 를 만들고 야후 분배 대조를 붙인다
 
 검증 숫자로는 멈추지 않는다 — 멈추는 것은 이어 붙인 결과의 이음매 뒤 행이 실물과 다를 때와, 상품 표와 ④ 대상 표의
 기초가 어긋날 때다.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Final
 
 import pandas as pd
 
+from quant_data.catalog import CATALOG, Dataset, Kind, kr_adjusted_path
 from quant_data.constants import (
     AUD_USD_DATA_PATH,
     COL_DATE,
@@ -28,11 +30,13 @@ from quant_data.constants import (
     ROUND_PERCENT,
     VALIDATION_DIR,
 )
+from quant_data.domestic import build_kr_adjusted
 from quant_data.leveraged.comparison import VARIANT_ADOPTED, AssumptionResult, annual_gap_rate, assumption_variants
 from quant_data.leveraged.monthly_data import load_monthly_data
 from quant_data.leveraged.synthetic import LeveragedRun, build_leveraged_synthetics
 from quant_data.logger import get_logger
 from quant_data.prices import PriceBasis, load_prices, price_path, round_prices
+from quant_data.series import load_series
 from quant_data.synthetic.gold_proxy import build_gold_proxy, load_gold_proxy_sources
 from quant_data.synthetic.proxy_comparison import (
     DISPLAY_END,
@@ -127,6 +131,11 @@ class _Inputs:
             return self._updated[path].copy()
         return load_monthly_data(self._root / path)
 
+    def series(self, path: Path) -> pd.DataFrame:
+        if path in self._updated:
+            return self._updated[path].copy()
+        return load_series(self._root / path)
+
     def remember(self, path: Path, synthetic: pd.DataFrame) -> None:
         """만든 합성을 저장될 값으로 반올림해 둔다 — 레버리지 합성이 파일만으로 다시 만든 결과와 마지막 자리까지 같게."""
         self._made[path] = round_prices(synthetic)
@@ -172,7 +181,32 @@ def build_products(root: Path, updated: Mapping[Path, pd.DataFrame]) -> Products
         YEARS_PATH: years_table,
         ASSUMPTIONS_PATH: _assumptions_table(runs, ffr_df, expense_df, summaries, inputs),
     }
-    return Products(prices=prices, tables=tables)
+    kr_prices, kr_notes = build_kr_products(root, updated, [d for d in CATALOG if d.kind is Kind.KRX_ETF])
+    prices.update(kr_prices)
+    return Products(prices=prices, tables=tables, notes=kr_notes)
+
+
+def build_kr_products(
+    root: Path, updated: Mapping[Path, pd.DataFrame], datasets: Sequence[Dataset]
+) -> tuple[dict[Path, pd.DataFrame], dict[Path, tuple[str, ...]]]:
+    """
+    국내 ETF 마다 원본가 · 야후 분배 기록(이번 표, 없으면 파일)으로 국내 수정주가를 만든다 — (시세, 야후 분배 대조 어긋남).
+
+    Raises:
+        FileNotFoundError: 원본가 · 분배 기록 파일이 없을 때
+        ValueError: 기준가가 0 이하일 때 (build_kr_adjusted)
+    """
+    inputs = _Inputs(root, updated)
+    prices: dict[Path, pd.DataFrame] = {}
+    notes: dict[Path, tuple[str, ...]] = {}
+    for dataset in datasets:
+        raw_path, dividends_path = dataset.files
+        result = build_kr_adjusted(inputs.prices(raw_path), inputs.series(dividends_path))
+        output = kr_adjusted_path(dataset.name)
+        prices[output] = result.prices
+        notes[output] = result.notes
+        logger.debug(f"국내 수정주가 {dataset.name}: {len(result.prices):,}행, 야후 분배 대조 어긋남 {len(result.notes)}건")
+    return prices, notes
 
 
 def _proxy_synthetic(name: str, proxy_df: pd.DataFrame, actual_df: pd.DataFrame, proxy_label: str) -> pd.DataFrame:

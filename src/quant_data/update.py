@@ -4,19 +4,23 @@
 받을 자료를 끝까지 받아 판정하고, 비정상(판정 규칙 ①)이나 새로 붙는 날 실패(판정 규칙 ②)가 하나라도 있으면 한 번에
 보이고 아무 파일도 쓰지 않는다. 받기 · 가공의 예외는 그 자리에서 올라가고 역시 쓰지 않는다(결정 Q17).
 비정상은 사람이 --exclude(옛 값 · 옛 끝날 그대로) 또는 --accept(이번 응답으로 덮어씀)로 정하고(결정 Q16),
-새로 붙는 날 실패는 패스 목록(국내 공식 등락률은 국내 분할 기록도)으로만 넘긴다. 고정 자료는 받지 않는다(결정 Q20).
+새로 붙는 날 실패는 패스 목록으로만 넘긴다. 고정 자료는 받지 않는다(결정 Q20) — 판 요약에 오른 적 없는 고정 자료만
+파일이 없을 때 한 번 받는다(첫 판, 사용자 결정 2026-11-11).
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from enum import Enum
 from pathlib import Path
+from typing import Final
 
 import pandas as pd
 
 from quant_data.catalog import Dataset, Kind, Method
-from quant_data.constants import COL_DATE, EDITION_PATH, PASS_LIST_PATH, REQUIRED_COLUMNS, ROUND_INPUT_PRICE
+from quant_data.constants import COL_CLOSE, COL_DATE, EDITION_PATH, PASS_LIST_PATH, REQUIRED_COLUMNS, ROUND_INPUT_PRICE
 from quant_data.edition import (
+    KEY_DISTRIBUTION_CHECK,
     KEY_FILES,
     KEY_FIRST_DAY,
     KEY_FIRST_DIVIDEND,
@@ -40,7 +44,9 @@ from quant_data.logger import get_logger
 from quant_data.new_days import (
     NewDayFailure,
     appended_days,
-    check_daily_move,
+    check_coin_two_sources,
+    check_kr_base_rate,
+    check_kr_two_sources,
     check_pair,
     load_pass_list,
     remaining_failures,
@@ -53,13 +59,25 @@ from quant_data.prices import (
     save_prices,
     validate_price_series,
 )
-from quant_data.revision import PriceRevision, RevisionKind, format_abnormal_block, judge_revision
+from quant_data.revision import PriceEvents, PriceRevision, RevisionKind, format_abnormal_block, judge_revision
+from quant_data.series import SERIES_COLUMNS, judge_series_append, load_series, save_series, validate_series
 from quant_data.sources.yahoo import YahooResponse
 
 logger = get_logger(__name__)
 
-_YAHOO_KINDS = (Kind.YAHOO_FUND, Kind.YAHOO_INDEX)
-_FETCHABLE_KINDS = (*_YAHOO_KINDS, Kind.FRED_MONTHLY)
+_YAHOO_KINDS: Final = (Kind.YAHOO_FUND, Kind.YAHOO_INDEX)
+_FETCHABLE_KINDS: Final = (
+    *_YAHOO_KINDS,
+    Kind.FRED_MONTHLY,
+    Kind.KRX_ETF,
+    Kind.KRX_INDEX,
+    Kind.KRX_NAV,
+    Kind.BITSTAMP,
+    Kind.COINMETRICS,
+)
+# KRX 자료는 다시 받을 때의 판정이 없다 — 첫 판만 받는 고정이어야 한다(국내 합성 2단계에서 판정과 함께 바꾼다)
+_FIXED_ONLY_KINDS: Final = (Kind.KRX_ETF, Kind.KRX_INDEX, Kind.KRX_NAV)
+_YAHOO_KR_SUFFIX: Final = ".KS"  # 국내 ETF 의 야후 티커 — 9종 모두 유가증권시장 상장
 _STATUS_BY_KIND = {
     RevisionKind.NEW: STATUS_NEW,
     RevisionKind.NOISE: STATUS_NOISE,
@@ -68,25 +86,41 @@ _STATUS_BY_KIND = {
 _TABLE_ENCODING = "utf-8-sig"  # 검증 표는 한글 머리 — Excel 이 BOM 없는 UTF-8 을 깨뜨려 읽는다
 
 
+class _Form(Enum):
+    """파일 모양 — 읽기 · 검사 · 쓰기 함수를 고른다."""
+
+    PRICES = "시세"
+    SERIES = "하루 한 값 계열"
+    MONTHLY = "월별"
+    OTHER = "그 밖(읽기만)"
+
+
 @dataclass(frozen=True)
 class Fetchers:
     """받기 함수 — 받는 방식(Kind)마다 하나. 파일은 쓰지 않는다."""
 
     yahoo: Callable[[str], YahooResponse]
     ffr_monthly: Callable[[], pd.DataFrame]
+    krx_etf: Callable[[str], pd.DataFrame]
+    krx_index: Callable[[str], pd.DataFrame]
+    krx_nav: Callable[[str], pd.DataFrame]
+    bitstamp: Callable[[], pd.DataFrame]
+    coinmetrics: Callable[[str], pd.DataFrame]
 
 
 @dataclass(frozen=True)
 class Products:
-    """가공 결과 — 저장소 루트 기준 경로 → 표. prices 는 시세(6자리 반올림 · 검사 뒤 저장), tables 는 반올림을 마친 검증 표."""
+    """가공 결과 — 저장소 루트 기준 경로 → 표. prices 는 시세(6자리 반올림 · 검사 뒤 저장), tables 는 반올림을 마친 검증 표,
+    notes 는 가공 시세에 붙는 대조 어긋남(국내 수정주가의 야후 분배 대조 — 판 요약에 적는다)."""
 
     prices: Mapping[Path, pd.DataFrame]
     tables: Mapping[Path, pd.DataFrame]
+    notes: Mapping[Path, tuple[str, ...]] = field(default_factory=lambda: {})
 
 
 @dataclass(frozen=True)
 class Abnormal:
-    """판정 규칙 ① 의 비정상 파일 하나 — revision 은 시세 판정이면 원인 블록에 쓰는 판정, 월별 판정이면 None."""
+    """판정 규칙 ① 의 비정상 파일 하나 — revision 은 시세 판정이면 원인 블록에 쓰는 판정, 계열 · 월별 판정이면 None."""
 
     name: str
     path: Path
@@ -111,6 +145,7 @@ class _FileOutcome:
     """받은 파일 하나의 판정 — table 은 이 판정대로 쓸 표(비정상이면 --accept 했을 때 쓸 응답)."""
 
     path: Path
+    form: _Form
     existing: pd.DataFrame | None
     table: pd.DataFrame
     status: str
@@ -120,8 +155,11 @@ class _FileOutcome:
 
 @dataclass(frozen=True)
 class _DatasetOutcome:
+    """자료 하나의 판정 — companion 은 판정 규칙 ② 에만 쓰는 받은 표(국내 ETF 의 야후 .KS 원본가)."""
+
     dataset: Dataset
     files: tuple[_FileOutcome, ...]
+    companion: pd.DataFrame | None = None
 
     @property
     def abnormal(self) -> bool:
@@ -150,27 +188,30 @@ def run_update(
         exclude: 받지 않고 옛 값 · 옛 끝날 그대로 둘 자료 이름 (사람이 정한다)
         accept: 비정상이어도 이번 응답으로 덮어쓸 자료 이름 (사람이 정한다)
         build_products: 이번에 쓸 표(경로 → 표)를 받아 가공 결과를 돌려준다 — 쓰지 않은 파일은 스스로 읽는다
-        fetch: False 면 아무것도 받지 않고 지금 파일로 가공 · 판 요약만 한다 (첫 판 · 가공 코드를 고친 뒤)
+        fetch: False 면 아무것도 받지 않고 지금 파일로 가공 · 판 요약만 한다 (가공 코드를 고친 뒤)
 
     Returns:
         UpdateResult
 
     Raises:
-        ValueError: 표 밖 · 고정 자료 이름, 두 옵션에 같은 이름, fetch=False 에 옵션, 받는 함수가 없는 종류가 고정이 아님,
-            짝이 표에 없음, 고정 자료 파일이 없음 — 모두 받기 전에
+        ValueError: 표 밖 · 고정 자료 이름, 두 옵션에 같은 이름, fetch=False 에 옵션, 받는 함수가 없는 종류 · KRX 종류가
+            고정이 아님, 짝이 표에 없음, 판 요약에 있던 고정 자료 파일이 없음, fetch=False 인데 처음 받을 고정 자료가 있음 —
+            모두 받기 전에
         FileNotFoundError: 패스 목록이 없을 때
     """
     by_name = {dataset.name: dataset for dataset in catalog}
     _check_catalog(catalog, by_name)
     _check_options(by_name, exclude, accept, fetch)
-    _require_fixed_files(root, catalog)
-    pass_list = load_pass_list(root / PASS_LIST_PATH)
     previous = read_edition(root / EDITION_PATH)
+    first_fetch = _first_fetch_names(root, catalog, previous)
+    if not fetch and first_fetch:
+        raise ValueError(f"처음 받을 고정 자료가 있어 받지 않는 갱신(--no-fetch)을 할 수 없습니다: {sorted(first_fetch)}")
+    pass_list = load_pass_list(root / PASS_LIST_PATH)
 
     outcomes: dict[str, _DatasetOutcome] = {}
     if fetch:
         for dataset in catalog:
-            if dataset.method is Method.FIXED or dataset.name in exclude:
+            if dataset.name in exclude or (dataset.method is Method.FIXED and dataset.name not in first_fetch):
                 continue
             outcomes[dataset.name] = _fetch_and_judge(dataset, fetchers, root, cutoff_date, dataset.name in accept)
 
@@ -197,6 +238,10 @@ def _check_catalog(catalog: Sequence[Dataset], by_name: Mapping[str, Dataset]) -
     for dataset in catalog:
         if dataset.method is not Method.FIXED and dataset.kind not in _FETCHABLE_KINDS:
             raise ValueError(f"{dataset.name}: 「{dataset.kind.value}」 는 받는 함수가 없어 고정으로만 둘 수 있습니다")
+        if dataset.method is not Method.FIXED and dataset.kind in _FIXED_ONLY_KINDS:
+            raise ValueError(
+                f"{dataset.name}: 「{dataset.kind.value}」 는 다시 받을 때의 판정이 없어 고정(첫 판만 받음)으로만 둘 수 있습니다"
+            )
         if dataset.pair is not None and dataset.pair not in by_name:
             raise ValueError(f"{dataset.name} 의 짝 {dataset.pair} 가 자료별 갱신 방식 표에 없습니다")
 
@@ -216,33 +261,78 @@ def _check_options(by_name: Mapping[str, Dataset], exclude: Collection[str], acc
             raise ValueError(f"{option} 의 {fixed} 는 고정 자료라 받지 않습니다 — 고정 자료에는 쓸 수 없습니다")
 
 
-def _require_fixed_files(root: Path, catalog: Sequence[Dataset]) -> None:
-    missing = [
-        path.as_posix()
-        for dataset in catalog
-        if dataset.method is Method.FIXED
-        for path in dataset.files
-        if not (root / path).exists()
-    ]
-    if missing:
-        raise ValueError(f"고정 자료 파일이 없습니다: {missing} — 다시 받지 않는 자료라 git 이력에서 되살리세요")
+def _first_fetch_names(root: Path, catalog: Sequence[Dataset], previous: Mapping[str, object] | None) -> set[str]:
+    """
+    이번에 첫 판으로 받을 고정 자료 — 파일이 모두 없고 판 요약에 오른 적 없는 것.
+
+    Raises:
+        ValueError: 판 요약에 있던 고정 파일이 없을 때(지운 파일을 새 데이터로 조용히 바꾸지 않는다), 일부 파일만 있을 때
+    """
+    listed = previous.get(KEY_FILES, {}) if previous is not None else {}
+    listed_paths = set(listed) if isinstance(listed, dict) else set()
+    first: set[str] = set()
+    restore: list[str] = []
+    partial: list[str] = []
+    for dataset in catalog:
+        if dataset.method is not Method.FIXED:
+            continue
+        missing = [path for path in dataset.files if not (root / path).exists()]
+        if not missing:
+            continue
+        restore += [path.as_posix() for path in missing if path.as_posix() in listed_paths]
+        if len(missing) != len(dataset.files):
+            partial.append(dataset.name)
+        else:
+            first.add(dataset.name)
+    if restore:
+        raise ValueError(f"고정 자료 파일이 없습니다: {restore} — 판 요약에 있던 다시 받지 않는 자료라 git 이력에서 되살리세요")
+    if partial:
+        raise ValueError(f"고정 자료의 파일이 일부만 있습니다: {partial} — 남은 파일을 git 이력에서 되살리거나 모두 지운 뒤 다시 실행하세요")
+    unfetchable = sorted(name for name in first if _kind_of(catalog, name) not in _FETCHABLE_KINDS)
+    if unfetchable:
+        raise ValueError(f"고정 자료 파일이 없는데 받는 함수가 없습니다: {unfetchable} — git 이력에서 되살리세요")
+    return first
+
+
+def _kind_of(catalog: Sequence[Dataset], name: str) -> Kind:
+    return next(dataset.kind for dataset in catalog if dataset.name == name)
 
 
 def _fetch_and_judge(
     dataset: Dataset, fetchers: Fetchers, root: Path, cutoff_date: date, accepted: bool
 ) -> _DatasetOutcome:
     if dataset.kind in _YAHOO_KINDS:
-        response = fetchers.yahoo(dataset.name)
-        files = tuple(_judge_price_file(dataset, path, response, root, cutoff_date, accepted) for path in dataset.files)
-    elif dataset.kind is Kind.FRED_MONTHLY:
+        response = fetchers.yahoo(dataset.source_id)
+        files = tuple(_judge_yahoo_file(dataset, path, response, root, cutoff_date, accepted) for path in dataset.files)
+        return _DatasetOutcome(dataset, files)
+    if dataset.kind is Kind.FRED_MONTHLY:
         monthly = fetchers.ffr_monthly()
-        files = tuple(_judge_monthly_file(dataset, path, monthly, root, accepted) for path in dataset.files)
-    else:
-        raise RuntimeError(f"내부 불변조건 위반: 받는 함수가 없는 종류 {dataset.kind} 가 받기까지 왔습니다 ({dataset.name})")
-    return _DatasetOutcome(dataset, files)
+        return _DatasetOutcome(dataset, tuple(_judge_monthly_file(dataset, path, monthly, root, accepted) for path in dataset.files))
+    if dataset.kind is Kind.KRX_ETF:
+        return _fetch_kr_etf(dataset, fetchers, root, cutoff_date, accepted)
+    if dataset.kind is Kind.BITSTAMP:
+        table = fetchers.bitstamp()
+        (path,) = dataset.files
+        return _DatasetOutcome(dataset, (_judge_plain_prices(dataset, path, table, root, cutoff_date, accepted),))
+    if dataset.kind in (Kind.KRX_INDEX, Kind.KRX_NAV, Kind.COINMETRICS):
+        fetch_series = {
+            Kind.KRX_INDEX: fetchers.krx_index,
+            Kind.KRX_NAV: fetchers.krx_nav,
+            Kind.COINMETRICS: fetchers.coinmetrics,
+        }[dataset.kind]
+        series = fetch_series(dataset.source_id)
+        (path,) = dataset.files
+        return _DatasetOutcome(dataset, (_judge_series_file(dataset, path, series, root, cutoff_date, accepted),))
+    raise RuntimeError(f"내부 불변조건 위반: 받는 함수가 없는 종류 {dataset.kind} 가 받기까지 왔습니다 ({dataset.name})")
 
 
-def _judge_price_file(
+def _cut(table: pd.DataFrame, existing: pd.DataFrame | None, cutoff_date: date) -> pd.DataFrame:
+    """받을 마지막 날까지 — 기존 끝날이 더 뒤면 기존 끝날까지(기존 행을 판정 없이 지우지 않는다)."""
+    last_day = cutoff_date if existing is None or existing.empty else max(cutoff_date, existing[COL_DATE].iloc[-1])
+    return table[table[COL_DATE] <= last_day].reset_index(drop=True)
+
+
+def _judge_yahoo_file(
     dataset: Dataset, path: Path, response: YahooResponse, root: Path, cutoff_date: date, accepted: bool
 ) -> _FileOutcome:
     _, basis = parse_price_file_name(path.name)
@@ -250,11 +340,9 @@ def _judge_price_file(
         raise RuntimeError(f"내부 불변조건 위반: 받는 자료 {dataset.name} 의 파일에 합성 파일 {path} 가 있습니다")
     source = response.raw if basis is PriceBasis.RAW else response.adjusted
     existing = load_prices(root / path) if (root / path).exists() else None
-    last_day = cutoff_date if existing is None else max(cutoff_date, existing[COL_DATE].iloc[-1])
-    cut = source[source[COL_DATE] <= last_day].reset_index(drop=True)
     revision = judge_revision(
         existing,
-        cut,
+        _cut(source, existing, cutoff_date),
         response.events,
         price_decimals=ROUND_INPUT_PRICE,
         explain_dividends=basis is PriceBasis.ADJUSTED,
@@ -263,7 +351,34 @@ def _judge_price_file(
     first_dividend: date | None = min(dividends.index) if len(dividends) else None
     status, abnormal = _status(dataset.name, path, revision.kind, revision.issues, revision, accepted)
     logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.prices):,}행)")
-    return _FileOutcome(path, existing, round_prices(revision.prices), status, abnormal, first_dividend)
+    return _FileOutcome(path, _Form.PRICES, existing, round_prices(revision.prices), status, abnormal, first_dividend)
+
+
+def _judge_plain_prices(
+    dataset: Dataset, path: Path, table: pd.DataFrame, root: Path, cutoff_date: date, accepted: bool
+) -> _FileOutcome:
+    """배당 · 분할 기록이 없는 시세(KRX 원본가 · Bitstamp) — 과거가 흔들림 밖으로 바뀌면 모두 비정상이다."""
+    existing = load_prices(root / path) if (root / path).exists() else None
+    cut = _cut(table, existing, cutoff_date)
+    no_events = PriceEvents(
+        dividends=pd.Series(dtype=float),
+        splits=pd.Series(dtype=float),
+        raw_close=pd.Series(cut[COL_CLOSE].to_numpy(dtype=float), index=list(cut[COL_DATE])),
+    )
+    revision = judge_revision(existing, cut, no_events, price_decimals=ROUND_INPUT_PRICE, explain_dividends=False)
+    status, abnormal = _status(dataset.name, path, revision.kind, revision.issues, revision, accepted)
+    logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.prices):,}행)")
+    return _FileOutcome(path, _Form.PRICES, existing, round_prices(revision.prices), status, abnormal, None)
+
+
+def _judge_series_file(
+    dataset: Dataset, path: Path, series: pd.DataFrame, root: Path, cutoff_date: date, accepted: bool
+) -> _FileOutcome:
+    existing = load_series(root / path) if (root / path).exists() else None
+    revision = judge_series_append(existing, _cut(series, existing, cutoff_date), decimals=dataset.decimals)
+    status, abnormal = _status(dataset.name, path, revision.kind, revision.issues, None, accepted)
+    logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.values):,}행)")
+    return _FileOutcome(path, _Form.SERIES, existing, revision.values, status, abnormal, None)
 
 
 def _judge_monthly_file(
@@ -273,7 +388,25 @@ def _judge_monthly_file(
     revision = judge_monthly_append(existing, response)
     status, abnormal = _status(dataset.name, path, revision.kind, revision.issues, None, accepted)
     logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.values):,}개월)")
-    return _FileOutcome(path, existing, revision.values, status, abnormal, None)
+    return _FileOutcome(path, _Form.MONTHLY, existing, revision.values, status, abnormal, None)
+
+
+def _fetch_kr_etf(
+    dataset: Dataset, fetchers: Fetchers, root: Path, cutoff_date: date, accepted: bool
+) -> _DatasetOutcome:
+    """KRX 원본가와 야후 .KS(원본가 — 두 출처 검사, 분배 기록 — C-2 금액 · 대조)를 받는다. 고정이라 첫 판에서만 온다."""
+    raw_path, dividends_path = dataset.files
+    krx = fetchers.krx_etf(dataset.source_id)
+    yahoo = fetchers.yahoo(f"{dataset.source_id}{_YAHOO_KR_SUFFIX}")
+    if (root / raw_path).exists():
+        raise RuntimeError(f"내부 불변조건 위반: 첫 판만 받는 국내 ETF {dataset.name} 의 원본가 파일이 이미 있습니다")
+    raw_file = _judge_plain_prices(dataset, raw_path, krx, root, cutoff_date, accepted)
+    dividends = yahoo.events.dividends
+    dividend_series = pd.DataFrame(
+        {COL_DATE: list(dividends.index), SERIES_COLUMNS[1]: dividends.to_numpy(dtype=float)}, columns=SERIES_COLUMNS
+    )
+    dividend_file = _judge_series_file(dataset, dividends_path, dividend_series, root, cutoff_date, accepted)
+    return _DatasetOutcome(dataset, (raw_file, dividend_file), companion=yahoo.raw)
 
 
 def _status(
@@ -299,19 +432,30 @@ def _new_day_failures(
     failures: list[NewDayFailure] = []
     for name, outcome in outcomes.items():
         dataset = outcome.dataset
-        if outcome.abnormal or dataset.kind not in _YAHOO_KINDS:
+        if outcome.abnormal:
             continue
-        target = _check_target(outcome)
-        days = appended_days(target.existing, target.table)
-        if not days:
-            continue
-        if dataset.pair is not None:
-            pair = _pair_table(by_name[dataset.pair], outcomes, root)
-            failures += check_pair(
-                target.table, pair, ticker=name, pair_name=dataset.pair, leverage=dataset.leverage, days=days
-            )
-        if dataset.daily_move_limit is not None:
-            failures += check_daily_move(target.table, ticker=name, days=days, limit=dataset.daily_move_limit)
+        if dataset.kind in _YAHOO_KINDS and dataset.pair is not None:
+            target = _check_target(outcome)
+            days = appended_days(target.existing, target.table)
+            if days:
+                pair = _pair_prices(by_name[dataset.pair], outcomes, root)
+                failures += check_pair(
+                    target.table, pair, ticker=name, pair_name=dataset.pair, leverage=dataset.leverage, days=days
+                )
+        elif dataset.kind is Kind.KRX_ETF:
+            raw = outcome.files[0]
+            # 새 파일은 전 기간에 건다 — 국내는 분배 · 액션을 찾아야 C-2 가 맞다(결정 Q34)
+            days = list(raw.table[COL_DATE]) if raw.existing is None else appended_days(raw.existing, raw.table)
+            if outcome.companion is None:
+                raise RuntimeError(f"내부 불변조건 위반: 국내 ETF {name} 의 야후 원본가가 없습니다")
+            failures += check_kr_two_sources(raw.table, outcome.companion, ticker=name, days=days)
+            failures += check_kr_base_rate(raw.table, ticker=name, days=days)
+        elif dataset.kind is Kind.BITSTAMP and dataset.pair is not None:
+            target = outcome.files[0]
+            days = appended_days(target.existing, target.table)
+            if days:
+                pair = _pair_series(by_name[dataset.pair], outcomes, root)
+                failures += check_coin_two_sources(target.table, pair, ticker=name, pair_name=dataset.pair, days=days)
     return failures
 
 
@@ -321,21 +465,33 @@ def _check_target(outcome: _DatasetOutcome) -> _FileOutcome:
     return by_basis.get(PriceBasis.ADJUSTED) or by_basis[PriceBasis.RAW]
 
 
-def _pair_table(pair: Dataset, outcomes: Mapping[str, _DatasetOutcome], root: Path) -> pd.DataFrame:
-    """짝의 이번 표 — 받아 판정이 정상이면 그 표, 아니면 지금 파일, 파일도 없으면 빈 표(모든 날이 「짝 없음」)."""
+def _pair_prices(pair: Dataset, outcomes: Mapping[str, _DatasetOutcome], root: Path) -> pd.DataFrame:
+    """짝 시세의 이번 표 — 받아 판정이 정상이면 그 표(수정주가가 있으면 그것), 아니면 지금 파일, 없으면 빈 표(모두 「짝 없음」)."""
     outcome = outcomes.get(pair.name)
     if outcome is not None and not outcome.abnormal:
         return _check_target(outcome).table
-    path = root / pair.files[0]
+    by_basis = {parse_price_file_name(path.name)[1]: path for path in pair.files}
+    path = root / (by_basis.get(PriceBasis.ADJUSTED) or by_basis[PriceBasis.RAW])
     return load_prices(path) if path.exists() else pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 
+def _pair_series(pair: Dataset, outcomes: Mapping[str, _DatasetOutcome], root: Path) -> pd.DataFrame:
+    """짝 계열의 이번 표 — 받아 판정이 정상이면 그 표, 아니면 지금 파일, 없으면 빈 표."""
+    outcome = outcomes.get(pair.name)
+    if outcome is not None and not outcome.abnormal:
+        return outcome.files[0].table
+    path = root / pair.files[0]
+    return load_series(path) if path.exists() else pd.DataFrame(columns=SERIES_COLUMNS)
+
+
 def _validate_before_write(outcomes: Mapping[str, _DatasetOutcome], products: Products) -> None:
-    """쓸 시세를 모두 먼저 검사한다 — 쓰는 도중에 걸려 일부 파일만 바뀐 판이 남지 않게."""
+    """쓸 시세 · 계열을 모두 먼저 검사한다 — 쓰는 도중에 걸려 일부 파일만 바뀐 판이 남지 않게."""
     for outcome in outcomes.values():
-        if outcome.dataset.kind in _YAHOO_KINDS:
-            for file in outcome.files:
+        for file in outcome.files:
+            if file.form is _Form.PRICES:
                 validate_price_series(file.table)
+            elif file.form is _Form.SERIES:
+                validate_series(file.table)
     for table in products.prices.values():
         validate_price_series(round_prices(table))
 
@@ -344,10 +500,14 @@ def _write(root: Path, outcomes: Mapping[str, _DatasetOutcome], products: Produc
     written: list[Path] = []
     for outcome in outcomes.values():
         for file in outcome.files:
-            if outcome.dataset.kind in _YAHOO_KINDS:
+            if file.form is _Form.PRICES:
                 save_prices(file.table, root / file.path)
-            else:
+            elif file.form is _Form.SERIES:
+                save_series(file.table, root / file.path, decimals=outcome.dataset.decimals)
+            elif file.form is _Form.MONTHLY:
                 save_monthly_data(file.table, root / file.path)
+            else:
+                raise RuntimeError(f"내부 불변조건 위반: 쓸 수 없는 모양 {file.form} 의 파일 {file.path} 를 받았습니다")
             written.append(file.path)
     for path, table in products.prices.items():
         save_prices(table, root / path)
@@ -357,6 +517,18 @@ def _write(root: Path, outcomes: Mapping[str, _DatasetOutcome], products: Produc
         table.to_csv(root / path, index=False, encoding=_TABLE_ENCODING)
         written.append(path)
     return written
+
+
+def _form_of(dataset: Dataset, path: Path) -> _Form:
+    if dataset.kind in (*_YAHOO_KINDS, Kind.BITSTAMP):
+        return _Form.PRICES
+    if dataset.kind is Kind.KRX_ETF:
+        return _Form.PRICES if path == dataset.files[0] else _Form.SERIES
+    if dataset.kind in (Kind.KRX_INDEX, Kind.KRX_NAV, Kind.COINMETRICS):
+        return _Form.SERIES
+    if dataset.kind in (Kind.FRED_MONTHLY, Kind.MANUAL_MONTHLY):
+        return _Form.MONTHLY
+    return _Form.OTHER
 
 
 def _edition_entries(
@@ -390,6 +562,8 @@ def _edition_entries(
     for path, table in products.prices.items():
         ticker, _ = parse_price_file_name(path.name)
         entries[path] = _period_entry(ticker, table, STATUS_PRODUCT)
+        if path in products.notes:
+            entries[path][KEY_DISTRIBUTION_CHECK] = list(products.notes[path])
     return entries
 
 
@@ -400,18 +574,22 @@ def _idle_status(dataset: Dataset, exclude: Collection[str]) -> str:
 
 
 def _read_for_period(dataset: Dataset, path: Path) -> pd.DataFrame:
-    if dataset.kind in _YAHOO_KINDS:
+    form = _form_of(dataset, path)
+    if form is _Form.PRICES:
         return load_prices(path)
+    if form is _Form.SERIES:
+        return load_series(path)
     return pd.read_csv(path, dtype=str)
 
 
 def _period_entry(ticker: str, table: pd.DataFrame, status: str) -> dict[str, object]:
-    """종목 · 첫날 · 끝날 · 행 수 · 상태 — 날짜는 첫 열(시세의 Date · 계열의 DATE)."""
+    """종목 · 첫날 · 끝날 · 행 수 · 상태 — 날짜는 첫 열(시세 · 계열의 Date · 월별의 DATE). 행이 없으면 날짜는 None."""
     first_column = table.columns[0]
+    empty = table.empty
     return {
         KEY_TICKER: ticker,
-        KEY_FIRST_DAY: _day_text(table[first_column].iloc[0]),
-        KEY_LAST_DAY: _day_text(table[first_column].iloc[-1]),
+        KEY_FIRST_DAY: None if empty else _day_text(table[first_column].iloc[0]),
+        KEY_LAST_DAY: None if empty else _day_text(table[first_column].iloc[-1]),
         KEY_ROWS: len(table),
         KEY_STATUS: status,
     }
@@ -428,7 +606,7 @@ def _day_text(value: object) -> str:
 def format_stop_report(result: UpdateResult, *, run_at: datetime, cutoff_date: date, yfinance_version: str) -> str:
     """
     멈춘 갱신의 원인 — 사용자가 그대로 AI 에 붙여 판단을 받는다. 시세 비정상은 원인 블록(--accept · --exclude 안내),
-    월별 비정상은 원인 줄, 새로 붙는 날 실패는 패스 목록에 적을 줄의 앞 세 칸과 함께 낸다.
+    계열 · 월별 비정상은 원인 줄, 새로 붙는 날 실패는 패스 목록에 적을 줄의 앞 세 칸과 함께 낸다.
     """
     sections: list[str] = []
     price_entries = [(a.name, a.path, a.revision) for a in result.abnormal if a.revision is not None]

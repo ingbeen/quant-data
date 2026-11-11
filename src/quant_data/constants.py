@@ -15,7 +15,6 @@ VALIDATION_DIR: Final = STORAGE_DIR / "validation"  # 합성 검증 표
 EDITION_PATH: Final = STORAGE_DIR / "edition.json"  # 판 요약
 
 PASS_LIST_PATH: Final = RECORDS_DIR / "pass_list.csv"  # 새로 붙는 날 검사의 예외 — 사람과 AI 가 적는다
-KR_ACTIONS_PATH: Final = RECORDS_DIR / "kr_actions.csv"  # 국내 분할 기록 — 사람만 적는다
 
 FFR_DATA_PATH: Final = SERIES_DIR / "federal_funds_rate_monthly.csv"  # FRED 월별 연방기금금리
 EXPENSE_RATIO_DATA_PATH: Final = SERIES_DIR / "tqqq_net_expense_ratio_monthly.csv"  # TQQQ 순운용비율 (손 갱신)
@@ -34,8 +33,13 @@ COL_VOLUME: Final = "Volume"
 REQUIRED_COLUMNS: Final = [COL_DATE, COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME]
 PRICE_COLUMNS: Final = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]
 
-# KRX 공식 등락률 — pykrx 반환 그대로 % 단위 (전역 python.md 「pykrx」)
-COL_CHANGE_RATE: Final = "change_rate"
+# KRX 원본가 파일의 추가 열 — 기준가(원) · 공식 등락률(%, KRX 표기 그대로 — 전역 python.md 「pykrx」) · 상장좌수
+COL_BASE_PRICE: Final = "BasePrice"
+COL_CHANGE_RATE: Final = "ChangeRate"
+COL_LISTED_SHARES: Final = "ListedShares"
+
+# 하루 한 값인 계열(지수 종가 · NAV · Coin Metrics · 분배 기록)의 값 열 — 단위는 계열마다 달라 이름이 중립이다
+COL_VALUE: Final = "Value"
 
 # FRED fredgraph.csv 의 날짜 열 — 이름을 바꾼 적이 있음(DATE → observation_date) → 받을 때 머리까지 고정
 FRED_DATE_COLUMN: Final = "observation_date"

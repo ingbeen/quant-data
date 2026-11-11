@@ -10,7 +10,7 @@
 
 import argparse
 import sys
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from functools import partial
 from pathlib import Path
 
@@ -21,6 +21,9 @@ from quant_data.edition import KEY_CUTOFF, read_edition
 from quant_data.leveraged.monthly_data import fetch_ffr_monthly
 from quant_data.logger import get_logger
 from quant_data.products import build_products
+from quant_data.sources.bitstamp import fetch_bitstamp_history
+from quant_data.sources.coinmetrics import fetch_coinmetrics_series
+from quant_data.sources.krx import fetch_krx_etf, fetch_krx_index, fetch_krx_nav
 from quant_data.sources.yahoo import YFINANCE_VERSION, fetch_yahoo, resolve_cutoff_date
 from quant_data.update import Fetchers, format_stop_report, run_update
 
@@ -89,9 +92,19 @@ def main() -> int:
     cutoff_date = resolve_cutoff_date(args.end, now) if fetch else _cutoff_without_fetch(root, args.end)
     logger.debug(f"기준일 {cutoff_date} · 받기 {'함' if fetch else '안 함'}")
 
+    # 비트코인 받기의 「지금」은 받기 직전에 잰다 — 받은 뒤에 재면 UTC 하루가 바뀌는 순간 진행 중이던 날이 끝난 날로 남는다
+    fetchers = Fetchers(
+        yahoo=fetch_yahoo,
+        ffr_monthly=fetch_ffr_monthly,
+        krx_etf=fetch_krx_etf,
+        krx_index=fetch_krx_index,
+        krx_nav=fetch_krx_nav,
+        bitstamp=lambda: fetch_bitstamp_history(datetime.now(UTC)),
+        coinmetrics=lambda metric: fetch_coinmetrics_series(metric, datetime.now(UTC)),
+    )
     result = run_update(
         CATALOG,
-        Fetchers(yahoo=fetch_yahoo, ffr_monthly=fetch_ffr_monthly),
+        fetchers,
         root=root,
         cutoff_date=cutoff_date,
         exclude=frozenset(args.exclude),

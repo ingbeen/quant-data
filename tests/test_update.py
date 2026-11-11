@@ -6,9 +6,12 @@ update 모듈 테스트 — 갱신 명령: 받기 → 판정 → 가공 → (전
    받기 실패 · 가공 실패는 그 자리에서 멈추고 역시 쓰지 않는가? (결정 Q17)
 2. --exclude 는 옛 값 · 옛 끝날을 두고, --accept 는 이번 응답으로 덮어쓰는가? 둘 다 판정 규칙 ② 의 실패는 놓아주지 않는가? (결정 Q16)
 3. 분할은 비정상으로 멈추고 원인에 「분할로 보이는 변화」를 적는가? (결정 Q23)
-4. 고정 자료는 요청하지 않는가? (결정 Q20)
-5. 새로 붙는 날만 짝 대조 · 하루 변동 검사를 걸고, 패스 목록에 있으면 통과하며, 급등락으로 저장이 거부되지 않는가?
-   기존 파일이 없으면 미국 짝 대조를 걸지 않는가? (결정 Q26 · Q27 · Q29 · Q34)
+4. 고정 자료는 요청하지 않는가? (결정 Q20) 판 요약에 오른 적 없는 고정 자료만 한 번 받고, 판 요약에 있던 고정 파일이
+   없으면 받기 전에 멈추는가? (사용자 결정 2026-11-11)
+5. 새로 붙는 날만 짝 대조를 걸고, 패스 목록에 있으면 통과하며, 급등락으로 저장이 거부되지 않는가?
+   기존 파일이 없으면 미국 짝 대조 · 비트코인 두 출처 대조를 걸지 않는가? (결정 Q26 · Q29 · Q34)
+8. 국내 ETF 는 KRX 원본가와 야후(.KS) 원본가 · 분배 기록을 받고, 첫 판은 두 국내 검사를 전 기간에 거는가? (결정 Q14 · Q34)
+9. 비트코인은 Bitstamp 일봉과 Coin Metrics 계열을 덧붙이고, 계열의 지난 값이 바뀌면 멈추는가?
 6. 월별 금리는 지난 달이 그대로일 때만 새 달을 붙이는가? (결정 Q36)
 7. 판 요약에 파일마다 종목 · 기간 · 행 수 · 상태 · 분배 기록 첫날이 적히는가? (결정 Q12)
 
@@ -28,20 +31,24 @@ import pytest
 
 from quant_data.catalog import Dataset, Kind, Method
 from quant_data.constants import (
+    COL_BASE_PRICE,
+    COL_CHANGE_RATE,
     COL_CLOSE,
     COL_DATE,
     COL_HIGH,
     COL_LOW,
     COL_OPEN,
     COL_VOLUME,
+    COL_LISTED_SHARES,
+    COL_VALUE,
     EDITION_PATH,
-    KR_ACTIONS_PATH,
     PASS_LIST_PATH,
     REQUIRED_COLUMNS,
     SERIES_DIR,
 )
 from quant_data.edition import (
     KEY_CUTOFF,
+    KEY_DISTRIBUTION_CHECK,
     KEY_FILES,
     KEY_FIRST_DAY,
     KEY_FIRST_DIVIDEND,
@@ -56,11 +63,13 @@ from quant_data.edition import (
     STATUS_NOISE,
     STATUS_NOT_FETCHED,
     STATUS_PRODUCT,
+    write_edition,
 )
 from quant_data.leveraged.monthly_data import load_monthly_data, save_monthly_data
-from quant_data.new_days import TEMP_DAILY_MOVE_LIMIT, Check
+from quant_data.new_days import Check
 from quant_data.prices import PriceBasis, load_prices, price_path, save_prices
 from quant_data.revision import PriceEvents
+from quant_data.series import load_series, save_series
 from quant_data.sources.yahoo import YahooResponse
 from quant_data.update import Fetchers, Products, UpdateResult, format_stop_report, run_update
 
@@ -132,31 +141,73 @@ def _response(
 
 
 class FakeSources:
-    """받기 대역 — 부른 자료를 순서대로 남기고, fail 에 든 티커는 받기 실패를 낸다."""
+    """받기 대역 — 부른 자료를 순서대로 남기고, fail 에 든 이름은 받기 실패를 낸다.
+
+    calls 에는 야후 티커 · "FFR" · "KRX:{코드}" · "KRX_INDEX:{코드}" · "KRX_NAV:{코드}" · "BITSTAMP" · "CM:{지표}" 가 남는다.
+    """
 
     def __init__(
         self,
         yahoo: Mapping[str, YahooResponse],
         ffr: pd.DataFrame = FFR_RESPONSE,
         fail: frozenset[str] = frozenset(),
+        *,
+        krx: Mapping[str, pd.DataFrame] | None = None,
+        series: Mapping[str, pd.DataFrame] | None = None,
+        bitstamp: pd.DataFrame | None = None,
     ) -> None:
         self.responses = dict(yahoo)
         self.ffr = ffr
         self.fail = fail
+        self.krx = dict(krx or {})
+        self.series = dict(series or {})
+        self.bitstamp_table = bitstamp
         self.calls: list[str] = []
 
+    def _record(self, call: str) -> None:
+        self.calls.append(call)
+        if call in self.fail:
+            raise ConnectionError(f"받기 실패 대역: {call}")
+
     def _yahoo(self, ticker: str) -> YahooResponse:
-        self.calls.append(ticker)
-        if ticker in self.fail:
-            raise ConnectionError(f"받기 실패 대역: {ticker}")
+        self._record(ticker)
         return self.responses[ticker]
 
     def _ffr(self) -> pd.DataFrame:
-        self.calls.append("FFR")
+        self._record("FFR")
         return self.ffr
 
+    def _krx_etf(self, code: str) -> pd.DataFrame:
+        self._record(f"KRX:{code}")
+        return self.krx[code]
+
+    def _krx_index(self, code: str) -> pd.DataFrame:
+        self._record(f"KRX_INDEX:{code}")
+        return self.series[f"KRX_INDEX:{code}"]
+
+    def _krx_nav(self, code: str) -> pd.DataFrame:
+        self._record(f"KRX_NAV:{code}")
+        return self.series[f"KRX_NAV:{code}"]
+
+    def _bitstamp(self) -> pd.DataFrame:
+        self._record("BITSTAMP")
+        assert self.bitstamp_table is not None
+        return self.bitstamp_table
+
+    def _coinmetrics(self, metric: str) -> pd.DataFrame:
+        self._record(f"CM:{metric}")
+        return self.series[f"CM:{metric}"]
+
     def fetchers(self) -> Fetchers:
-        return Fetchers(yahoo=self._yahoo, ffr_monthly=self._ffr)
+        return Fetchers(
+            yahoo=self._yahoo,
+            ffr_monthly=self._ffr,
+            krx_etf=self._krx_etf,
+            krx_index=self._krx_index,
+            krx_nav=self._krx_nav,
+            bitstamp=self._bitstamp,
+            coinmetrics=self._coinmetrics,
+        )
 
 
 def _normal_sources(**overrides: YahooResponse) -> FakeSources:
@@ -170,14 +221,13 @@ def _no_products(_updated: Mapping[Path, pd.DataFrame]) -> Products:
 
 
 def _write_records(root: Path) -> None:
-    for path, header in ((PASS_LIST_PATH, "종목,날짜,검사,사유,근거"), (KR_ACTIONS_PATH, "종목,날짜,비율,근거")):
-        (root / path).parent.mkdir(parents=True, exist_ok=True)
-        (root / path).write_text(header + "\n", encoding="utf-8-sig")
+    (root / PASS_LIST_PATH).parent.mkdir(parents=True, exist_ok=True)
+    (root / PASS_LIST_PATH).write_text("종목,날짜,검사,사유,근거\n", encoding="utf-8-sig")
 
 
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
-    """저장소 루트 대역 — QQQ · ^NDX 는 앞 3일, VFINX 는 고정 파일, 월별 금리는 두 달, 기록 파일은 머리만."""
+    """저장소 루트 대역 — QQQ · ^NDX 는 앞 3일, VFINX 는 고정 파일, 월별 금리는 두 달, 패스 목록은 머리만."""
     save_prices(_table(QQQ_CLOSES[:EXISTING_ROWS]), tmp_path / QQQ_RAW)
     save_prices(_table(QQQ_CLOSES[:EXISTING_ROWS]), tmp_path / QQQ_ADJUSTED)
     save_prices(_table(NDX_CLOSES[:EXISTING_ROWS]), tmp_path / NDX_RAW)
@@ -398,13 +448,18 @@ class TestCatalogCheck:
                 "짝",
             ),
             (Dataset(name="EXP", kind=Kind.MANUAL_MONTHLY, method=Method.APPEND, files=(FFR_FILE,)), "받는 함수"),
+            (
+                Dataset(name="069500", kind=Kind.KRX_ETF, method=Method.REFETCH, files=(Path("storage/prices/069500_raw.csv"),)),
+                "고정",
+            ),
         ],
-        ids=["pair_missing", "manual_not_fixed"],
+        ids=["pair_missing", "manual_not_fixed", "krx_not_fixed"],
     )
     def test_bad_catalog_raises(self, root: Path, dataset: Dataset, pattern: str) -> None:
         """
-        목적: 짝이 표에 없거나, 받는 함수가 없는 종류(손 갱신 등)를 고정이 아닌 방식으로 두면 받기 전에 멈춘다 —
-              짝이 없으면 새로 붙는 날이 모두 「짝 없음」으로 멈추고, 받는 함수가 없으면 갱신 도중에 깨진다
+        목적: 짝이 표에 없거나, 받는 함수가 없는 종류(손 갱신 등)를 고정이 아닌 방식으로 두거나, KRX 자료를 고정이 아닌
+              방식으로 두면 받기 전에 멈춘다 — 짝이 없으면 새로 붙는 날이 모두 「짝 없음」으로 멈추고, 받는 함수가 없으면
+              갱신 도중에 깨지고, KRX 자료는 다시 받을 때의 판정이 없다(첫 판만 받는다)
 
         Given: 잘못된 줄 하나가 든 표
         When: run_update
@@ -772,36 +827,6 @@ class TestNewDayChecks:
         assert not result.stopped
         assert load_prices(root / QQQ_ADJUSTED)[COL_CLOSE].iloc[-1] == pytest.approx(164.8, abs=1e-6)
 
-    def test_unpaired_daily_move_stops(self, root: Path) -> None:
-        """
-        목적: 짝이 없는 금 · 장기채는 하루 변동이 임시 한도 이상이면 멈춘다 — 저장 거부(ValueError)가 아니라
-              「멈춤 → 확인 → 다시 실행」 경로다(Q26 · Q27)
-
-        Given: 하루 변동 한도가 있는 GLD, 11-06 +60%
-        When: run_update
-        Then: 멈춤, 실패 = [(GLD, 11-06, 하루 변동)]
-        """
-        # Given
-        gld_files = (price_path("GLD", PriceBasis.RAW), price_path("GLD", PriceBasis.ADJUSTED))
-        gld = Dataset(
-            name="GLD",
-            kind=Kind.YAHOO_FUND,
-            method=Method.REFETCH,
-            files=gld_files,
-            daily_move_limit=TEMP_DAILY_MOVE_LIMIT,
-        )
-        closes = [150.0, 151.0, 152.0, 153.0, 153.0 * 1.6]
-        for file in gld_files:
-            save_prices(_table(closes[:EXISTING_ROWS]), root / file)
-        sources = FakeSources({"GLD": _response(closes)})
-
-        # When
-        result = _run(root, sources, catalog=(gld,))
-
-        # Then
-        assert result.stopped
-        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [("GLD", DAYS[4], Check.DAILY_MOVE)]
-
     def test_new_file_skips_pair_check(self, root: Path) -> None:
         """
         목적: 기존 파일이 없는 종목(첫 판)에는 미국 짝 대조를 걸지 않고 새 파일로 쓴다(Q34)
@@ -867,24 +892,71 @@ class TestCutoff:
 
 
 class TestFixedFiles:
-    """고정 자료 파일"""
+    """고정 자료 파일 — 판 요약에 오른 적 없는 고정 자료만 한 번 받는다 (사용자 결정 2026-11-11)"""
 
-    def test_missing_fixed_file_raises_before_fetching(self, root: Path) -> None:
+    def test_missing_fixed_file_listed_in_edition_raises_before_fetching(self, root: Path) -> None:
         """
-        목적: 고정 자료의 파일이 없으면 받기 전에 멈춘다 — 다시 받지 않는 자료라 없어진 채 가공이 돌면 합성이 엉뚱하게 멈춘다
+        목적: 판 요약에 있던 고정 파일이 없으면 받기 전에 멈춘다 — 지운 고정 파일을 새 데이터로 조용히 바꾸지 않는다
 
-        Given: VFINX 파일 없음
+        Given: VFINX 가 오른 판 요약, VFINX 파일 없음
         When: run_update
-        Then: ValueError (「고정」), 아무것도 받지 않음
+        Then: ValueError (「고정」 · 「git」), 아무것도 받지 않음
         """
         # Given
+        write_edition(root / EDITION_PATH, CUTOFF, {VFINX_ADJUSTED: {KEY_STATUS: STATUS_FIXED}})
         (root / VFINX_ADJUSTED).unlink()
         sources = _normal_sources()
 
         # When & Then
-        with pytest.raises(ValueError, match="고정"):
+        with pytest.raises(ValueError, match="고정.*git"):
             _run(root, sources)
         assert sources.calls == []
+
+    def test_fixed_dataset_not_in_edition_is_fetched_once(self, root: Path) -> None:
+        """
+        목적: 판 요약에 오른 적 없는 고정 자료는 파일이 없으면 첫 판으로 한 번 받는다 — 표에 새로 더한 고정 자료
+              (verify-lab 몫)가 첫 판을 받는 길이다
+
+        Given: 판 요약 없음, VFINX 파일 없음, VFINX 응답
+        When: run_update
+        Then: VFINX 를 받고 파일을 쓰며 판 요약의 상태는 「새로」
+        """
+        # Given
+        (root / VFINX_ADJUSTED).unlink()
+        sources = _normal_sources(VFINX=_response(VFINX_CLOSES, days=DAYS[:3]))
+
+        # When
+        result = _run(root, sources)
+
+        # Then
+        assert not result.stopped
+        assert "VFINX" in sources.calls
+        assert len(load_prices(root / VFINX_ADJUSTED)) == len(VFINX_CLOSES)
+        assert _edition(root)[KEY_FILES][VFINX_ADJUSTED.as_posix()][KEY_STATUS] == STATUS_NEW
+
+    def test_no_fetch_with_pending_first_fetch_raises(self, root: Path) -> None:
+        """
+        목적: 처음 받을 고정 자료가 남아 있으면 받지 않는 갱신(--no-fetch)은 멈춘다 — 가공이 없는 파일을 읽다 깨지기 전에
+
+        Given: 판 요약 없음, VFINX 파일 없음
+        When: run_update(fetch=False)
+        Then: ValueError (「처음 받을」)
+        """
+        # Given
+        (root / VFINX_ADJUSTED).unlink()
+
+        # When & Then
+        with pytest.raises(ValueError, match="처음 받을"):
+            run_update(
+                CATALOG,
+                _normal_sources().fetchers(),
+                root=root,
+                cutoff_date=CUTOFF,
+                exclude=frozenset(),
+                accept=frozenset(),
+                build_products=_no_products,
+                fetch=False,
+            )
 
 
 class TestProducts:
@@ -1008,3 +1080,247 @@ class TestEdition:
 
         # Then
         assert _edition(root)[KEY_FILES][QQQ_RAW.as_posix()][KEY_STATUS] == STATUS_NEW
+
+    def test_product_notes_are_written_to_edition(self, root: Path) -> None:
+        """
+        목적: 가공이 돌려준 대조 어긋남(국내 수정주가의 야후 분배 대조)이 그 가공 파일의 판 요약 항목에 적힌다 (Q28)
+
+        Given: 어긋남 한 줄이 붙은 가공 시세
+        When: run_update
+        Then: 그 파일 항목의 「분배 대조 어긋난 날」 = [그 줄]
+        """
+        # Given
+        note = "2022-07-28 기준가 −70원 — 야후 기록 없음"
+
+        def products(_updated: Mapping[Path, pd.DataFrame]) -> Products:
+            return Products(prices={QQQ_SYNTHETIC: _table(QQQ_CLOSES)}, tables={}, notes={QQQ_SYNTHETIC: (note,)})
+
+        # When
+        _run(root, _normal_sources(), build_products=products)
+
+        # Then
+        assert _edition(root)[KEY_FILES][QQQ_SYNTHETIC.as_posix()][KEY_DISTRIBUTION_CHECK] == [note]
+
+
+KR_RAW = price_path("069500", PriceBasis.RAW)
+KR_DIVIDENDS = SERIES_DIR / "069500_yahoo_dividends.csv"
+KR = Dataset(name="069500", kind=Kind.KRX_ETF, method=Method.FIXED, files=(KR_RAW, KR_DIVIDENDS))
+KR_CLOSES = [32000, 32105, 32245, 32385, 32370]
+KR_EX_DAY = 2  # 11-04 분배락 — 기준가 32,035 (전날 32,105 에서 70원)
+
+
+def _krx_table(closes: list[int], bases: dict[int, int] | None = None, rates: dict[int, float] | None = None) -> pd.DataFrame:
+    """KRX 받기 응답 — 기준가는 주지 않으면 전날 종가, 공식 등락률은 주지 않으면 종가 ÷ 기준가 − 1 의 2자리."""
+    base_list = [(bases or {}).get(i, closes[i - 1] if i else c) for i, c in enumerate(closes)]
+    rate_list = [
+        (rates or {}).get(i, round((c / b - 1) * 100, 2)) for i, (c, b) in enumerate(zip(closes, base_list, strict=True))
+    ]
+    frame = _table([float(c) for c in closes])
+    frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]] = frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]].astype("int64")
+    frame[COL_BASE_PRICE] = base_list
+    frame[COL_CHANGE_RATE] = rate_list
+    frame[COL_LISTED_SHARES] = 159_800_000
+    return frame
+
+
+def _kr_sources(
+    krx: pd.DataFrame | None = None, yahoo_closes: list[float] | None = None, dividends: dict[date, float] | None = None
+) -> FakeSources:
+    krx_table = krx if krx is not None else _krx_table(KR_CLOSES, bases={KR_EX_DAY: 32035})
+    yahoo = _response(yahoo_closes or [float(c) for c in KR_CLOSES], dividends=dividends or {DAYS[KR_EX_DAY]: 70.0})
+    return FakeSources({"069500.KS": yahoo}, krx={"069500": krx_table})
+
+
+class TestDomestic:
+    """국내 ETF — KRX 원본가 + 야후(.KS) 원본가 · 분배 기록, 첫 판은 두 국내 검사를 전 기간에 (Q14 · Q34)"""
+
+    def test_first_fetch_writes_raw_with_krx_columns_and_dividends(self, root: Path) -> None:
+        """
+        목적: 첫 판은 KRX 원본가와 야후 .KS 를 받아, 원본가 파일에 기준가 · 공식 등락률 · 상장좌수 열을 남기고 야후 분배
+              기록을 계열로 쓴다 — 국내 수정주가를 다시 받지 않고 만들 수 있게
+
+        Given: 표에 국내 ETF 하나(고정 · 판 요약에 없음), 11-04 분배락 70원
+        When: run_update
+        Then: 받은 것 KRX:069500 · 069500.KS, 원본가 파일에 기준가 열(11-04 = 32,035), 분배 기록 계열 = [(11-04, 70)]
+        """
+        # Given
+        sources = _kr_sources()
+
+        # When
+        result = _run(root, sources, catalog=(KR,))
+
+        # Then
+        assert not result.stopped
+        assert sources.calls == ["KRX:069500", "069500.KS"]
+        raw = load_prices(root / KR_RAW)
+        assert raw[COL_BASE_PRICE].tolist()[KR_EX_DAY] == 32035
+        assert COL_CHANGE_RATE in raw.columns and COL_LISTED_SHARES in raw.columns
+        dividends = load_series(root / KR_DIVIDENDS)
+        assert list(zip(dividends[COL_DATE], dividends[COL_VALUE], strict=True)) == [(DAYS[KR_EX_DAY], 70.0)]
+
+    def test_two_sources_mismatch_on_past_day_stops(self, root: Path) -> None:
+        """
+        목적: 첫 판(새 파일)은 KRX ↔ 야후 원본가 완전 일치를 전 기간에 건다 — 과거 날도 1원 다르면 멈춘다(Q34)
+
+        Given: 둘째 날 야후 종가가 KRX 보다 1원 큼
+        When: run_update
+        Then: 멈춤, 실패 = [(069500, 11-03, 두 출처 일치)], 아무 파일도 쓰지 않음
+        """
+        # Given
+        yahoo = [float(c) for c in KR_CLOSES]
+        yahoo[1] += 1
+        before = _snapshot(root)
+
+        # When
+        result = _run(root, _kr_sources(yahoo_closes=yahoo), catalog=(KR,))
+
+        # Then
+        assert result.stopped
+        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [("069500", DAYS[1], Check.KR_TWO_SOURCES)]
+        assert _snapshot(root) == before
+
+    def test_base_rate_mismatch_stops(self, root: Path) -> None:
+        """
+        목적: 기준가가 바뀐 날의 「종가 ÷ 기준가 − 1」이 공식 등락률과 맞지 않으면 멈춘다 — KRX 자료끼리 맞지 않으면
+              수정주가를 만들 기준가를 믿을 수 없다
+
+        Given: 11-04 기준가 32,000, 공식 등락률 0.66 (그 기준가로는 +0.77%)
+        When: run_update
+        Then: 멈춤, 실패 = [(069500, 11-04, 기준가 등락률)]
+        """
+        # Given
+        krx = _krx_table(KR_CLOSES, bases={KR_EX_DAY: 32000}, rates={KR_EX_DAY: 0.66})
+
+        # When
+        result = _run(root, _kr_sources(krx=krx), catalog=(KR,))
+
+        # Then
+        assert result.stopped
+        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [
+            ("069500", DAYS[KR_EX_DAY], Check.KR_BASE_RATE)
+        ]
+
+    def test_products_receive_raw_with_krx_columns_and_dividends(self, root: Path) -> None:
+        """
+        목적: 가공은 KRX 추가 열이 든 원본가 표와 야후 분배 기록을 받는다 — 국내 수정주가(C-2)의 재료
+
+        Given: 정상 첫 판
+        When: run_update
+        Then: 가공이 받은 표에 원본가(기준가 열 포함) · 분배 기록 계열이 있다
+        """
+        # Given
+        received: list[Mapping[Path, pd.DataFrame]] = []
+
+        def products(updated: Mapping[Path, pd.DataFrame]) -> Products:
+            received.append(updated)
+            return Products(prices={}, tables={})
+
+        # When
+        _run(root, _kr_sources(), catalog=(KR,), build_products=products)
+
+        # Then
+        assert COL_BASE_PRICE in received[0][KR_RAW].columns
+        assert received[0][KR_DIVIDENDS][COL_VALUE].tolist() == [70.0]
+
+
+BTC_RAW = price_path("BTCUSD", PriceBasis.RAW)
+BTC_PRICE = SERIES_DIR / "BTC_PriceUSD.csv"
+BTC = Dataset(name="BTCUSD", kind=Kind.BITSTAMP, method=Method.APPEND, files=(BTC_RAW,), pair="BTC_PriceUSD")
+BTC_PRICE_DATASET = Dataset(
+    name="BTC_PriceUSD", kind=Kind.COINMETRICS, method=Method.APPEND, files=(BTC_PRICE,), source="PriceUSD"
+)
+BTC_CLOSES = [60000.0, 61000.0, 62000.0, 63000.0, 64000.0]
+
+
+def _value_series(values: list[float], days: list[date] | None = None) -> pd.DataFrame:
+    return pd.DataFrame({COL_DATE: days if days is not None else DAYS[: len(values)], COL_VALUE: values})
+
+
+def _btc_sources(bitstamp: list[float] | None = None, reference: list[float] | None = None) -> FakeSources:
+    return FakeSources(
+        {},
+        bitstamp=_table(bitstamp or BTC_CLOSES),
+        series={"CM:PriceUSD": _value_series(reference or BTC_CLOSES)},
+    )
+
+
+class TestCoin:
+    """비트코인 — Bitstamp 일봉 · Coin Metrics 기준가 덧붙이기, 새로 붙는 날 두 출처 대조 (결정 Q6)"""
+
+    @pytest.fixture
+    def btc_root(self, root: Path) -> Path:
+        save_prices(_table(BTC_CLOSES[:EXISTING_ROWS]), root / BTC_RAW)
+        save_series(_value_series(BTC_CLOSES[:EXISTING_ROWS]), root / BTC_PRICE, decimals=6)
+        return root
+
+    def test_appends_both_sources(self, btc_root: Path) -> None:
+        """
+        목적: 두 출처가 같은 값이면 새 날만 붙인다
+
+        Given: 기존 3일, 응답 5일(같은 값)
+        When: run_update
+        Then: 멈추지 않음, Bitstamp 5행 · Coin Metrics 5행
+        """
+        # When
+        result = _run(btc_root, _btc_sources(), catalog=(BTC, BTC_PRICE_DATASET))
+
+        # Then
+        assert not result.stopped
+        assert len(load_prices(btc_root / BTC_RAW)) == len(DAYS)
+        assert len(load_series(btc_root / BTC_PRICE)) == len(DAYS)
+
+    def test_new_day_two_sources_difference_stops(self, btc_root: Path) -> None:
+        """
+        목적: 새로 붙는 날 Bitstamp 종가가 Coin Metrics 기준가와 5% 넘게 다르면 멈춘다
+
+        Given: 11-06 Bitstamp 64,000 × 1.06
+        When: run_update
+        Then: 멈춤, 실패 = [(BTCUSD, 11-06, 두 출처 차이)]
+        """
+        # When
+        result = _run(
+            btc_root, _btc_sources(bitstamp=[*BTC_CLOSES[:4], 64000.0 * 1.06]), catalog=(BTC, BTC_PRICE_DATASET)
+        )
+
+        # Then
+        assert result.stopped
+        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [
+            ("BTCUSD", DAYS[4], Check.COIN_TWO_SOURCES)
+        ]
+
+    def test_new_file_skips_two_sources_check(self, root: Path) -> None:
+        """
+        목적: 첫 판(새 파일)에는 두 출처 대조를 걸지 않는다 — 미국 짝 대조와 같은 이유(Q34)
+
+        Given: 파일 없음, 11-03 Bitstamp 가 기준가와 20% 다름
+        When: run_update
+        Then: 멈추지 않음
+        """
+        # When
+        result = _run(
+            root,
+            _btc_sources(bitstamp=[60000.0, 61000.0 * 1.2, 62000.0, 63000.0, 64000.0]),
+            catalog=(BTC, BTC_PRICE_DATASET),
+        )
+
+        # Then
+        assert not result.stopped
+
+    def test_changed_past_series_value_stops(self, btc_root: Path) -> None:
+        """
+        목적: Coin Metrics 계열의 지난 값이 바뀌면 비정상으로 멈춘다 — 판정 원칙 「데이터가 바뀌면 오류」
+
+        Given: 응답의 11-03 기준가가 61,000 → 61,500
+        When: run_update
+        Then: 멈춤, 비정상 = [(BTC_PriceUSD, Coin Metrics 파일)]
+        """
+        # When
+        result = _run(
+            btc_root,
+            _btc_sources(reference=[60000.0, 61500.0, 62000.0, 63000.0, 64000.0]),
+            catalog=(BTC, BTC_PRICE_DATASET),
+        )
+
+        # Then
+        assert result.stopped
+        assert [(a.name, a.path) for a in result.abnormal] == [("BTC_PriceUSD", BTC_PRICE)]
