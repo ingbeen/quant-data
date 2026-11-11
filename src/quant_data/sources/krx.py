@@ -1,7 +1,7 @@
 """KRX 받기 — 국내 ETF 원본가(기준가 · 공식 등락률 · 상장좌수) · 지수 종가 · NAV
 
 pykrx 를 쓴다. ETF 원본가는 pykrx 공개 함수(get_etf_ohlcv_by_date)가 KRX 응답의 대비 · 등락률 · 상장좌수를 버려,
-내부 클래스 `개별종목시세_ETF`(KRX 화면 MDCSTAT04501)를 직접 부른다(착수 전 측정 ①). pykrx 버전이 바뀌어 그 클래스 ·
+내부 클래스 `개별종목시세_ETF`(KRX 화면 MDCSTAT04501)를 직접 부른다(docs/research/시세_받기_판정.md 6.4). pykrx 버전이 바뀌어 그 클래스 ·
 열이 바뀌면 import · 열 이름 에러로 드러난다. 파일은 쓰지 않는다 — 판정 · 쓰기는 update 가 한다.
 
 pykrx 는 import 할 때 로그인하고 계정 아이디를 표준출력에 찍는다 → 자격증명을 환경 변수에 올린 뒤 함수 안에서
@@ -11,7 +11,7 @@ import 하고, pykrx 의 표준출력에서 아이디가 든 줄을 뺀 나머�
 import contextlib
 import io
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -31,6 +31,7 @@ from quant_data.constants import (
     COL_OPEN,
     COL_VALUE,
     COL_VOLUME,
+    REPO_ROOT,
     REQUIRED_COLUMNS,
 )
 from quant_data.logger import get_logger
@@ -39,7 +40,7 @@ logger = get_logger(__name__)
 
 ENV_KRX_ID: Final = "KRX_ID"  # pykrx 가 정한 이름
 ENV_KRX_PW: Final = "KRX_PW"
-ENV_PATH: Final = Path(__file__).resolve().parents[3] / ".env"  # 저장소 루트 — 실행 위치와 무관하게
+ENV_PATH: Final = REPO_ROOT / ".env"
 KST: Final = ZoneInfo("Asia/Seoul")
 _REQUEST_DATE_FORMAT: Final = "%Y%m%d"
 ETF_FIRST_REQUEST_DATE: Final = date(2002, 10, 14)  # 국내 첫 ETF(KODEX 200) 상장일 — 그 앞의 ETF 시세는 없다
@@ -82,7 +83,7 @@ def filtered_pykrx_output(text: str, account: str) -> list[str]:
 
 
 @contextlib.contextmanager
-def _pykrx_output_hidden() -> Iterator[None]:
+def _pykrx_output_hidden() -> Generator[None, None, None]:
     """블록 안의 표준출력을 모았다가 아이디가 든 줄을 빼고 로그로 남긴다 — 예외가 나도 남긴다."""
     buffer = io.StringIO()
     try:
@@ -114,7 +115,7 @@ def normalize_etf_records(records: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     가격 · 기준가 · 거래량 · 상장좌수는 부호 있는 int64 다 — `uint32` 로 두면 차분에서 하락일이 40억 근처 양수가 된다.
 
     Raises:
-        ValueError: 행에 필요한 열이 없을 때, 모르는 등락 구분, 가격이 비어 정수로 둘 수 없을 때
+        ValueError: 행에 필요한 열이 없을 때, 모르는 등락 구분, 가격 · 거래량 · 공식 등락률이 비었을 때
     """
     rows: list[dict[str, object]] = []
     for record in records:
@@ -140,9 +141,11 @@ def normalize_etf_records(records: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
         )
     frame = pd.DataFrame(rows, columns=[*REQUIRED_COLUMNS, COL_BASE_PRICE, COL_CHANGE_RATE, COL_LISTED_SHARES])
     integer_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_BASE_PRICE, COL_LISTED_SHARES]
-    if frame[integer_columns].isna().any().any():
-        bad = frame.loc[frame[integer_columns].isna().any(axis=1), COL_DATE].tolist()
-        raise ValueError(f"KRX 응답에 비어 있는 가격 · 거래량 칸이 있습니다 — 날짜: {bad[:5]} (메우지 않습니다)")
+    # 공식 등락률이 비면 기준가가 바뀐 날을 「안 바뀜」으로 판정함 → 분배금만큼 틀린 수정주가가 조용히 저장됨
+    required_columns = [*integer_columns, COL_CHANGE_RATE]
+    if frame[required_columns].isna().any().any():
+        bad = frame.loc[frame[required_columns].isna().any(axis=1), COL_DATE].tolist()
+        raise ValueError(f"KRX 응답에 비어 있는 가격 · 거래량 · 등락률 칸이 있습니다 — 날짜: {bad[:5]} (메우지 않습니다)")
     frame[integer_columns] = frame[integer_columns].round(0).astype("int64")
     return frame.sort_values(COL_DATE).reset_index(drop=True)
 

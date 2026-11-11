@@ -14,7 +14,7 @@ class TestInputPriceDecimals:
     def test_input_price_decimals_is_six(self) -> None:
         """
         목적: 시세 파일의 가격 자릿수가 6자리임을 고정한다 — quant 의 지금 입력 파일과 같은 자리라야 옮긴 뒤
-              결과 수치 필드 차이가 0 이다(Phase 3 대조)
+              결과 수치 필드 차이가 0 이다(시세_받기_판정.md 6.8)
 
         Given: 시세 저장 자릿수 상수
         When: 비교

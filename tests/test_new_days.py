@@ -227,7 +227,7 @@ class TestCheckKrTwoSources:
 
     def test_one_won_difference_fails(self) -> None:
         """
-        목적: 1원이라도 다르면 걸린다 — 착수 전 측정에서 두 출처가 값이 있는 날 9종 모두 같았다
+        목적: 1원이라도 다르면 걸린다 — 두 출처가 값이 있는 날 9종 모두 같았다(시세_받기_판정.md 6.3)
 
         Given: 둘째 날 KRX 35,500 · 야후 35,501
         When: check_kr_two_sources
@@ -285,8 +285,8 @@ class TestCheckKrBaseRate:
 
     def test_distribution_day_consistent_with_base_passes(self) -> None:
         """
-        목적: 분배락일(기준가가 내려간 날)은 그 기준가로 낸 등락률이 공식 등락률과 맞으면 통과한다 — 착수 전 측정 ① 의
-              80일이 모두 이 모양이었다
+        목적: 분배락일(기준가가 내려간 날)은 그 기준가로 낸 등락률이 공식 등락률과 맞으면 통과한다 — 기준가가 바뀐
+              80일이 모두 이 모양이었다(시세_받기_판정.md 6.4)
 
         Given: 전날 32,105 → 32,245, 기준가 32,035 (70원 분배), 공식 등락률 0.66 (= 32,245 ÷ 32,035 − 1)
         When: check_kr_base_rate

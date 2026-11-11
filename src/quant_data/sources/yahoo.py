@@ -77,8 +77,7 @@ def _new_york_zone() -> ZoneInfo:
         return ZoneInfo(NEW_YORK_TIMEZONE)
     except ZoneInfoNotFoundError:
         raise ZoneInfoNotFoundError(
-            f"뉴욕 시간대 자료({NEW_YORK_TIMEZONE})가 없습니다 — 운영체제의 tzdata 를 설치하거나 "
-            f"`poetry add tzdata` 로 넣은 뒤 다시 실행하세요"
+            f"뉴욕 시간대 자료({NEW_YORK_TIMEZONE})가 없습니다 — 운영체제의 tzdata 를 설치하거나 " f"`poetry add tzdata` 로 넣은 뒤 다시 실행하세요"
         ) from None
 
 

@@ -97,7 +97,7 @@ def validate_price_series(df: pd.DataFrame) -> None:
             mask = bad(df[col])
             if mask.any():
                 indices = df.index[mask].tolist()
-                dates = df.loc[mask, COL_DATE].tolist()
+                dates = df[COL_DATE][mask].tolist()
                 ellipsis = "..." if len(indices) > 5 else ""
                 raise ValueError(f"{label} - 컬럼: {col}, 인덱스: {indices[:5]}{ellipsis}, 날짜: {dates[:5]}{ellipsis}")
 

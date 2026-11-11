@@ -292,8 +292,7 @@ def _assumptions_table(
         group = [run for run in runs if run.underlying_path == underlying_path]
         if not group:
             raise ValueError(
-                f"검증 ④ 대상 표의 기초 {underlying_path} 를 쓰는 레버리지 상품이 없습니다 — "
-                "상품 표(LEVERAGED_SYNTHETIC_TARGETS)의 기초와 맞추세요"
+                f"검증 ④ 대상 표의 기초 {underlying_path} 를 쓰는 레버리지 상품이 없습니다 — " "상품 표(LEVERAGED_SYNTHETIC_TARGETS)의 기초와 맞추세요"
             )
         end = inputs.prices(first_product_path)[COL_DATE].iloc[0] - timedelta(days=1)
         dividend_gap_rate: float | None = None

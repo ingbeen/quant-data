@@ -284,7 +284,9 @@ class TestReadRepoState:
         state = read_repo_state(tmp_path, [Path("storage/prices/^NDX_raw.csv"), Path("storage/edition.json")], run=run)
 
         # Then
-        assert state == RepoState(commit="0123abcd", uncommitted=("storage/prices/^NDX_raw.csv", "storage/edition.json"))
+        assert state == RepoState(
+            commit="0123abcd", uncommitted=("storage/prices/^NDX_raw.csv", "storage/edition.json")
+        )
 
     def test_no_commit_yet(self, tmp_path: Path) -> None:
         """
@@ -295,9 +297,7 @@ class TestReadRepoState:
         Then: commit None
         """
         # Given
-        run = FakeRun(
-            {("rev-parse", "HEAD"): (128, ""), ("status", "--porcelain"): (0, "?? storage/edition.json\0")}
-        )
+        run = FakeRun({("rev-parse", "HEAD"): (128, ""), ("status", "--porcelain"): (0, "?? storage/edition.json\0")})
 
         # When
         state = read_repo_state(tmp_path, [Path("storage/edition.json")], run=run)

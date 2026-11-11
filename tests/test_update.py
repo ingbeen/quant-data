@@ -21,7 +21,8 @@ update 모듈 테스트 — 갱신 명령: 받기 → 판정 → 가공 → (전
 """
 
 import json
-from collections.abc import Mapping
+import logging
+from collections.abc import Iterator, Mapping
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -36,11 +37,11 @@ from quant_data.constants import (
     COL_CLOSE,
     COL_DATE,
     COL_HIGH,
+    COL_LISTED_SHARES,
     COL_LOW,
     COL_OPEN,
-    COL_VOLUME,
-    COL_LISTED_SHARES,
     COL_VALUE,
+    COL_VOLUME,
     EDITION_PATH,
     PASS_LIST_PATH,
     REQUIRED_COLUMNS,
@@ -63,6 +64,7 @@ from quant_data.edition import (
     STATUS_NOISE,
     STATUS_NOT_FETCHED,
     STATUS_PRODUCT,
+    read_edition,
     write_edition,
 )
 from quant_data.leveraged.monthly_data import load_monthly_data, save_monthly_data
@@ -225,16 +227,59 @@ def _write_records(root: Path) -> None:
     (root / PASS_LIST_PATH).write_text("종목,날짜,검사,사유,근거\n", encoding="utf-8-sig")
 
 
+ROOT_FILES = (QQQ_RAW, QQQ_ADJUSTED, NDX_RAW, VFINX_ADJUSTED, FFR_FILE)
+
+
+def _period_of(path: Path) -> dict[str, object]:
+    """판 요약 항목 — 파일의 첫 열(날짜)의 첫날 · 끝날과 행 수. 갱신이 쓴 판 요약과 같은 모양이다."""
+    table = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
+    days = table[table.columns[0]]
+    return {KEY_FIRST_DAY: days.iloc[0], KEY_LAST_DAY: days.iloc[-1], KEY_ROWS: len(table), KEY_STATUS: STATUS_NOISE}
+
+
+def _sync_edition(root: Path, *paths: Path) -> None:
+    """판 요약에 그 파일들의 항목을 지금 파일대로 적는다 — 판 요약이 없으면 새로 만든다."""
+    edition = read_edition(root / EDITION_PATH)
+    cutoff = date.fromisoformat(edition[KEY_CUTOFF]) if edition is not None else DAYS[EXISTING_ROWS - 1]
+    files = {Path(name): entry for name, entry in edition[KEY_FILES].items()} if edition is not None else {}
+    files.update({path: _period_of(root / path) for path in paths})
+    write_edition(root / EDITION_PATH, cutoff, files)
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
-    """저장소 루트 대역 — QQQ · ^NDX 는 앞 3일, VFINX 는 고정 파일, 월별 금리는 두 달, 패스 목록은 머리만."""
+    """저장소 루트 대역 — QQQ · ^NDX 는 앞 3일, VFINX 는 고정 파일, 월별 금리는 두 달, 패스 목록은 머리만.
+    판 요약이 이 파일들과 정확히 맞는다 — 어긋나면 갱신은 받든 안 받든 멈춘다."""
     save_prices(_table(QQQ_CLOSES[:EXISTING_ROWS]), tmp_path / QQQ_RAW)
     save_prices(_table(QQQ_CLOSES[:EXISTING_ROWS]), tmp_path / QQQ_ADJUSTED)
     save_prices(_table(NDX_CLOSES[:EXISTING_ROWS]), tmp_path / NDX_RAW)
     save_prices(_table(VFINX_CLOSES), tmp_path / VFINX_ADJUSTED)
     save_monthly_data(FFR_EXISTING, tmp_path / FFR_FILE)
     _write_records(tmp_path)
+    _sync_edition(tmp_path, *ROOT_FILES)
     return tmp_path
+
+
+def _drop_from_edition(root: Path, *paths: Path) -> None:
+    """판 요약에서 그 파일들의 항목을 뺀다 — 판 요약에 오른 적 없는 파일(새 자료)로 만든다."""
+    edition = _edition(root)
+    files = {Path(name): entry for name, entry in edition[KEY_FILES].items() if Path(name) not in paths}
+    write_edition(root / EDITION_PATH, date.fromisoformat(edition[KEY_CUTOFF]), files)
+
+
+@pytest.fixture
+def update_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """갱신 모듈의 로그 — 패키지 로거는 상위로 전하지 않아(logger.py) caplog 핸들러를 그 로거에 직접 단다."""
+    update_logger = logging.getLogger("quant_data.update")
+    update_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG, logger="quant_data.update")
+    yield caplog
+    update_logger.removeHandler(caplog.handler)
+
+
+def _log_lines(log: pytest.LogCaptureFixture, path: Path) -> list[str]:
+    """그 파일 이름이 든 로그 줄."""
+    return [record.getMessage() for record in log.records if path.name in record.getMessage()]
 
 
 def _snapshot(root: Path) -> dict[Path, bytes]:
@@ -251,6 +296,7 @@ def _run(
     accept: frozenset[str] = frozenset(),
     cutoff: date = CUTOFF,
     build_products=_no_products,
+    fetch: bool = True,
 ) -> UpdateResult:
     return run_update(
         catalog,
@@ -260,6 +306,7 @@ def _run(
         exclude=exclude,
         accept=accept,
         build_products=build_products,
+        fetch=fetch,
     )
 
 
@@ -314,6 +361,75 @@ class TestNormalUpdate:
         assert not result.stopped
         assert load_prices(root / QQQ_RAW)[COL_CLOSE].iloc[3] == 103.0
         assert load_prices(root / QQQ_ADJUSTED)[COL_CLOSE].iloc[3] == pytest.approx(102.5, abs=1e-6)
+
+    def test_explained_change_logs_matched_dividends(self, root: Path, update_log: pytest.LogCaptureFixture) -> None:
+        """
+        목적: 「설명되는 변화」로 덮어쓸 때 맞춘 배당 기록을 로그에 낸다 — 야후가 틀린 배당을 넣어도 대조할 외부
+              출처가 없어, 사람이 덮어쓴 까닭을 볼 곳은 이 줄뿐이다
+
+        Given: 수정주가 응답의 11-02 · 11-03 이 × 0.99, 11-04 배당 $1.01 기록(전날 원시 종가 101 → 비율 0.99),
+               원본가는 그대로
+        When: run_update
+        Then: 멈추지 않음, QQQ 수정주가 줄의 로그에 그 배당 기록
+        """
+        # Given
+        adjusted = [QQQ_CLOSES[0] * 0.99, QQQ_CLOSES[1] * 0.99, *QQQ_CLOSES[2:]]
+        sources = _normal_sources(QQQ=_response(QQQ_CLOSES, adjusted=adjusted, dividends={DAYS[2]: 1.01}))
+
+        # When
+        result = _run(root, sources)
+
+        # Then
+        assert not result.stopped
+        lines = _log_lines(update_log, QQQ_ADJUSTED)
+        assert any("2026-11-04 배당 $1.010" in line for line in lines), lines
+
+    def test_abnormal_change_does_not_log_matched_dividends(
+        self, root: Path, update_log: pytest.LogCaptureFixture
+    ) -> None:
+        """
+        목적: 비정상 판정 줄에는 맞춘 배당 기록을 붙이지 않는다 — 멈춰서 아무것도 덮어쓰지 않았는데 기록을 반영한
+              것처럼 읽힌다
+
+        Given: 수정주가 응답의 11-02 가 × 0.99 × 0.98 · 11-03 이 × 0.99, 11-04 배당 $1.01 기록 — 11-04 계단은 기록과
+               맞고 11-03 계단(× 0.98)은 기록이 없다
+        When: run_update
+        Then: 멈춤, QQQ 수정주가 줄은 있고 그 줄에 11-04 배당 기록이 없음
+        """
+        # Given
+        adjusted = [QQQ_CLOSES[0] * 0.99 * 0.98, QQQ_CLOSES[1] * 0.99, *QQQ_CLOSES[2:]]
+        sources = _normal_sources(QQQ=_response(QQQ_CLOSES, adjusted=adjusted, dividends={DAYS[2]: 1.01}))
+
+        # When
+        result = _run(root, sources)
+
+        # Then
+        assert result.stopped
+        lines = _log_lines(update_log, QQQ_ADJUSTED)
+        assert lines
+        assert not any("2026-11-04 배당" in line for line in lines), lines
+
+    def test_accepted_abnormal_change_logs_matched_dividends(
+        self, root: Path, update_log: pytest.LogCaptureFixture
+    ) -> None:
+        """
+        목적: --accept 로 비정상 응답을 덮어쓸 때도 맞춘 배당 기록을 로그에 낸다 — 덮어쓴 근거가 남는 곳이 이 줄뿐이다
+
+        Given: 위 비정상 응답(11-04 계단은 기록과 맞고 11-03 계단은 기록이 없다), --accept QQQ
+        When: run_update
+        Then: 멈추지 않음, QQQ 수정주가 줄에 11-04 배당 기록
+        """
+        # Given
+        adjusted = [QQQ_CLOSES[0] * 0.99 * 0.98, QQQ_CLOSES[1] * 0.99, *QQQ_CLOSES[2:]]
+        sources = _normal_sources(QQQ=_response(QQQ_CLOSES, adjusted=adjusted, dividends={DAYS[2]: 1.01}))
+
+        # When
+        result = _run(root, sources, accept=frozenset({"QQQ"}))
+
+        # Then
+        assert not result.stopped
+        lines = _log_lines(update_log, QQQ_ADJUSTED)
+        assert any("2026-11-04 배당 $1.010" in line for line in lines), lines
 
     def test_fixed_datasets_are_not_requested(self, root: Path) -> None:
         """
@@ -375,7 +491,7 @@ class TestRawFileJudgement:
 
 
 class TestNoFetch:
-    """--no-fetch — 받지 않고 지금 파일로 가공 · 판 요약만 (첫 판 · 가공 코드를 고친 뒤)"""
+    """--no-fetch — 받지 않고 지금 파일로 가공 · 판 요약만 (가공 코드를 고친 뒤)"""
 
     def test_requests_nothing_and_writes_products_and_edition(self, root: Path) -> None:
         """
@@ -449,7 +565,12 @@ class TestCatalogCheck:
             ),
             (Dataset(name="EXP", kind=Kind.MANUAL_MONTHLY, method=Method.APPEND, files=(FFR_FILE,)), "받는 함수"),
             (
-                Dataset(name="069500", kind=Kind.KRX_ETF, method=Method.REFETCH, files=(Path("storage/prices/069500_raw.csv"),)),
+                Dataset(
+                    name="069500",
+                    kind=Kind.KRX_ETF,
+                    method=Method.REFETCH,
+                    files=(Path("storage/prices/069500_raw.csv"),),
+                ),
                 "고정",
             ),
         ],
@@ -663,6 +784,23 @@ class TestExcludeAndAccept:
         assert load_prices(root / QQQ_ADJUSTED)[COL_CLOSE].iloc[0] == pytest.approx(100.4, abs=1e-9)
         assert result.accepted == ("QQQ",)
 
+    def test_accept_on_normal_response_is_not_reported_as_accepted(self, root: Path) -> None:
+        """
+        목적: --accept 를 줬어도 이번 판정이 비정상이 아니었으면 받아들인 자료로 알리지 않는다 — 기존 행을 지킨 판을
+              「이번 응답으로 덮어씀」이라 알리면 사람이 판 요약과 다른 기록을 믿는다
+
+        Given: QQQ 정상 응답(기존 행은 흔들림뿐), --accept QQQ
+        When: run_update
+        Then: 멈추지 않음, 결과의 받아들임 = (), 판 요약의 QQQ 수정주가 상태 = 흔들림뿐
+        """
+        # When
+        result = _run(root, _normal_sources(), accept=frozenset({"QQQ"}))
+
+        # Then
+        assert not result.stopped
+        assert result.accepted == ()
+        assert _edition(root)[KEY_FILES][QQQ_ADJUSTED.as_posix()][KEY_STATUS] == STATUS_NOISE
+
     def test_accept_does_not_release_new_day_failure(self, root: Path) -> None:
         """
         목적: --accept 는 판정 규칙 ①(과거 행)만 넘긴다 — 새로 붙는 날의 짝 차이 실패는 패스 목록으로만 넘긴다
@@ -752,9 +890,7 @@ class TestNewDayChecks:
         """
         # Given
         before = _snapshot(root)
-        sources = _normal_sources(
-            QQQ=_response(self.PAIR_BREAK_QQQ), **{"^NDX": _response(self.PAIR_BREAK_NDX)}
-        )
+        sources = _normal_sources(QQQ=_response(self.PAIR_BREAK_QQQ), **{"^NDX": _response(self.PAIR_BREAK_NDX)})
 
         # When
         result = _run(root, sources)
@@ -775,9 +911,7 @@ class TestNewDayChecks:
         # Given
         with (root / PASS_LIST_PATH).open("a", encoding="utf-8") as file:
             file.write("QQQ,2026-11-06,짝 차이,테스트 사유,테스트 근거\n")
-        sources = _normal_sources(
-            QQQ=_response(self.PAIR_BREAK_QQQ), **{"^NDX": _response(self.PAIR_BREAK_NDX)}
-        )
+        sources = _normal_sources(QQQ=_response(self.PAIR_BREAK_QQQ), **{"^NDX": _response(self.PAIR_BREAK_NDX)})
 
         # When
         result = _run(root, sources)
@@ -831,13 +965,14 @@ class TestNewDayChecks:
         """
         목적: 기존 파일이 없는 종목(첫 판)에는 미국 짝 대조를 걸지 않고 새 파일로 쓴다(Q34)
 
-        Given: QQQ 파일 없음, 응답의 11-03 이 +50%(나스닥100 +1%)
+        Given: QQQ 파일 없음(판 요약에도 없음 — 새로 더한 자료), 응답의 11-03 이 +50%(나스닥100 +1%)
         When: run_update
         Then: 멈추지 않음, QQQ 수정주가 5행
         """
         # Given
         (root / QQQ_RAW).unlink()
         (root / QQQ_ADJUSTED).unlink()
+        _drop_from_edition(root, QQQ_RAW, QQQ_ADJUSTED)
         qqq = [100.0, 150.0, 151.0, 152.0, 153.0]
 
         # When
@@ -894,35 +1029,120 @@ class TestCutoff:
 class TestFixedFiles:
     """고정 자료 파일 — 판 요약에 오른 적 없는 고정 자료만 한 번 받는다 (사용자 결정 2026-11-11)"""
 
-    def test_missing_fixed_file_listed_in_edition_raises_before_fetching(self, root: Path) -> None:
+    @pytest.mark.parametrize(
+        ("missing", "fetch"),
+        [
+            ((VFINX_ADJUSTED,), True),
+            ((QQQ_RAW, QQQ_ADJUSTED), True),
+            ((NDX_RAW,), True),
+            ((FFR_FILE,), True),
+            ((QQQ_RAW, QQQ_ADJUSTED), False),
+        ],
+        ids=["fixed", "refetch", "append_index", "append_monthly", "no_fetch"],
+    )
+    def test_missing_listed_file_raises_before_fetching(
+        self, root: Path, missing: tuple[Path, ...], fetch: bool
+    ) -> None:
         """
-        목적: 판 요약에 있던 고정 파일이 없으면 받기 전에 멈춘다 — 지운 고정 파일을 새 데이터로 조용히 바꾸지 않는다
+        목적: 판 요약에 있던 파일이 없으면 방식(고정 · 다시 받음 · 덧붙이기)과 관계없이 받든 안 받든 받기 전에 멈춘다 —
+              없는 파일은 판정 규칙 ① · ② 없이 「새로」 · 「첫 판」으로 써져, 지운 파일 자리에 바뀐 과거가 조용히 들어간다
 
-        Given: VFINX 가 오른 판 요약, VFINX 파일 없음
-        When: run_update
-        Then: ValueError (「고정」 · 「git」), 아무것도 받지 않음
+        Given: 판 요약에 오른 missing 파일이 없음
+        When: run_update(fetch)
+        Then: ValueError (어긋남 · 「git」), 아무것도 받지 않고 판 요약도 그대로
         """
         # Given
-        write_edition(root / EDITION_PATH, CUTOFF, {VFINX_ADJUSTED: {KEY_STATUS: STATUS_FIXED}})
-        (root / VFINX_ADJUSTED).unlink()
+        for path in missing:
+            (root / path).unlink()
+        sources = _normal_sources()
+        edition_before = (root / EDITION_PATH).read_bytes()
+
+        # When & Then
+        with pytest.raises(ValueError, match="판 요약과 데이터 파일이 어긋.*git"):
+            _run(root, sources, fetch=fetch)
+        assert sources.calls == []
+        assert (root / EDITION_PATH).read_bytes() == edition_before
+
+    @pytest.mark.parametrize("fetch", [True, False], ids=["fetch", "no_fetch"])
+    @pytest.mark.parametrize("change", ["shorter_file", "shifted_period", "unlisted_file"])
+    def test_edition_mismatch_raises_before_fetching(self, root: Path, change: str, fetch: bool) -> None:
+        """
+        목적: 판 요약과 파일이 정확히 맞지 않으면 받든 안 받든 받기 전에 멈춘다 — 갱신이 성공하면 판 요약은 그때 쓴
+              파일로 만들어지므로 정상이면 늘 맞는다. 어긋남은 판 요약보다 옛 판으로 파일만 되살렸거나(짧아진 날은 판정
+              없이 다시 채워진다), 옛 판 요약을 되살린 것(목록 밖의 지운 파일이 「새로」 써진다)이다
+
+        Given: ^NDX 파일이 판 요약보다 짧음(2행 — 판 요약은 3행) / 행 수는 같고 날짜가 하루 밀림 / 판 요약에 없음(파일은 있음)
+        When: run_update(fetch)
+        Then: ValueError (어긋남 · 「git」), 아무것도 받지 않고 판 요약도 그대로
+        """
+        # Given
+        if change == "shorter_file":
+            save_prices(_table(NDX_CLOSES[: EXISTING_ROWS - 1]), root / NDX_RAW)
+        elif change == "shifted_period":
+            save_prices(_table(NDX_CLOSES[:EXISTING_ROWS], days=DAYS[1 : EXISTING_ROWS + 1]), root / NDX_RAW)
+        else:
+            _drop_from_edition(root, NDX_RAW)
+        sources = _normal_sources()
+        edition_before = (root / EDITION_PATH).read_bytes()
+
+        # When & Then
+        with pytest.raises(ValueError, match="판 요약과 데이터 파일이 어긋.*git"):
+            _run(root, sources, fetch=fetch)
+        assert sources.calls == []
+        assert (root / EDITION_PATH).read_bytes() == edition_before
+
+    @pytest.mark.parametrize("fetch", [True, False], ids=["fetch", "no_fetch"])
+    def test_missing_edition_with_data_files_raises_before_fetching(self, root: Path, fetch: bool) -> None:
+        """
+        목적: 데이터 파일이 있는데 판 요약이 없으면 받든 안 받든 멈추고 git 이력에서 되살리라고만 안내한다 — 판 요약이
+              없으면 지운 파일을 가릴 수 없다. 받지 않는 갱신으로 판 요약을 새로 만들면 지운 파일이 목록에서 빠져 다음
+              갱신이 그 파일을 판정 없이 「새로」 쓰고, 고정 자료의 분배 기록 첫날 이월도 사라진다
+
+        Given: 판 요약 없음, 데이터 파일 있음
+        When: run_update(fetch)
+        Then: ValueError (「판 요약」 · 「git」, 「--no-fetch」 를 권하지 않음), 아무것도 받지 않고 판 요약을 쓰지 않음
+        """
+        # Given
+        (root / EDITION_PATH).unlink()
         sources = _normal_sources()
 
         # When & Then
-        with pytest.raises(ValueError, match="고정.*git"):
-            _run(root, sources)
+        with pytest.raises(ValueError, match="판 요약.*git") as error:
+            _run(root, sources, fetch=fetch)
+        assert "--no-fetch" not in str(error.value)
         assert sources.calls == []
+        assert not (root / EDITION_PATH).exists()
+
+    def test_missing_edition_without_data_files_fetches(self, root: Path) -> None:
+        """
+        목적: 판 요약도 표의 데이터 파일도 없으면(처음 받기) 받는다 — 판 요약이 없다는 것만으로 멈추면 첫 판을 받을 수 없다
+
+        Given: 판 요약 없음, 표 = 비트코인 둘(파일 없음)
+        When: run_update
+        Then: 멈추지 않음, Bitstamp 파일이 생김
+        """
+        # Given
+        (root / EDITION_PATH).unlink()
+
+        # When
+        result = _run(root, _btc_sources(), catalog=(BTC, BTC_PRICE_DATASET))
+
+        # Then
+        assert not result.stopped
+        assert (root / BTC_RAW).exists()
 
     def test_fixed_dataset_not_in_edition_is_fetched_once(self, root: Path) -> None:
         """
         목적: 판 요약에 오른 적 없는 고정 자료는 파일이 없으면 첫 판으로 한 번 받는다 — 표에 새로 더한 고정 자료
               (verify-lab 몫)가 첫 판을 받는 길이다
 
-        Given: 판 요약 없음, VFINX 파일 없음, VFINX 응답
+        Given: 판 요약에 VFINX 없음, VFINX 파일 없음, VFINX 응답
         When: run_update
         Then: VFINX 를 받고 파일을 쓰며 판 요약의 상태는 「새로」
         """
         # Given
         (root / VFINX_ADJUSTED).unlink()
+        _drop_from_edition(root, VFINX_ADJUSTED)
         sources = _normal_sources(VFINX=_response(VFINX_CLOSES, days=DAYS[:3]))
 
         # When
@@ -938,12 +1158,13 @@ class TestFixedFiles:
         """
         목적: 처음 받을 고정 자료가 남아 있으면 받지 않는 갱신(--no-fetch)은 멈춘다 — 가공이 없는 파일을 읽다 깨지기 전에
 
-        Given: 판 요약 없음, VFINX 파일 없음
+        Given: 판 요약에 VFINX 없음, VFINX 파일 없음
         When: run_update(fetch=False)
         Then: ValueError (「처음 받을」)
         """
         # Given
         (root / VFINX_ADJUSTED).unlink()
+        _drop_from_edition(root, VFINX_ADJUSTED)
 
         # When & Then
         with pytest.raises(ValueError, match="처음 받을"):
@@ -1067,13 +1288,14 @@ class TestEdition:
         """
         목적: 기존 파일이 없던 파일은 「새로」로 적는다 — 첫 판에서 처음 받은 파일과 이어 붙인 파일을 가른다
 
-        Given: QQQ 파일 없음
+        Given: QQQ 파일 없음(판 요약에도 없음 — 새로 더한 자료)
         When: run_update
         Then: QQQ 원본가 = 새로
         """
         # Given
         (root / QQQ_RAW).unlink()
         (root / QQQ_ADJUSTED).unlink()
+        _drop_from_edition(root, QQQ_RAW, QQQ_ADJUSTED)
 
         # When
         self._run_with_product(root, _normal_sources())
@@ -1109,11 +1331,14 @@ KR_CLOSES = [32000, 32105, 32245, 32385, 32370]
 KR_EX_DAY = 2  # 11-04 분배락 — 기준가 32,035 (전날 32,105 에서 70원)
 
 
-def _krx_table(closes: list[int], bases: dict[int, int] | None = None, rates: dict[int, float] | None = None) -> pd.DataFrame:
+def _krx_table(
+    closes: list[int], bases: dict[int, int] | None = None, rates: dict[int, float] | None = None
+) -> pd.DataFrame:
     """KRX 받기 응답 — 기준가는 주지 않으면 전날 종가, 공식 등락률은 주지 않으면 종가 ÷ 기준가 − 1 의 2자리."""
     base_list = [(bases or {}).get(i, closes[i - 1] if i else c) for i, c in enumerate(closes)]
     rate_list = [
-        (rates or {}).get(i, round((c / b - 1) * 100, 2)) for i, (c, b) in enumerate(zip(closes, base_list, strict=True))
+        (rates or {}).get(i, round((c / b - 1) * 100, 2))
+        for i, (c, b) in enumerate(zip(closes, base_list, strict=True))
     ]
     frame = _table([float(c) for c in closes])
     frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]] = frame[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]].astype("int64")
@@ -1158,6 +1383,30 @@ class TestDomestic:
         dividends = load_series(root / KR_DIVIDENDS)
         assert list(zip(dividends[COL_DATE], dividends[COL_VALUE], strict=True)) == [(DAYS[KR_EX_DAY], 70.0)]
 
+    def test_second_update_with_idle_fixed_kr_etf_writes_edition(self, root: Path) -> None:
+        """
+        목적: 첫 판 뒤의 갱신은 고정 국내 ETF 를 받지 않고, 그 두 파일(원본가 · 분배 기록)의 기간을 지금 파일로 재어 판
+              요약을 쓴다 — 원본가를 계열로 잘못 읽으면 평소 갱신이 늘 죽는다(2026-11-11 실제 갱신에서 드러남)
+
+        Given: 국내 ETF 첫 판을 받은 뒤
+        When: 같은 표로 run_update 를 한 번 더
+        Then: 아무것도 받지 않고 멈추지 않음, 판 요약의 원본가 항목 = 고정 · 원본가 행 수, 분배 기록 항목 = 고정 · 1행
+        """
+        # Given
+        _run(root, _kr_sources(), catalog=(KR,))
+        sources = _kr_sources()
+
+        # When
+        result = _run(root, sources, catalog=(KR,))
+
+        # Then
+        assert not result.stopped
+        assert sources.calls == []
+        files = _edition(root)[KEY_FILES]
+        raw, dividends = files[KR_RAW.as_posix()], files[KR_DIVIDENDS.as_posix()]
+        assert (raw[KEY_STATUS], raw[KEY_ROWS]) == (STATUS_FIXED, len(load_prices(root / KR_RAW)))
+        assert (dividends[KEY_STATUS], dividends[KEY_ROWS]) == (STATUS_FIXED, 1)
+
     def test_two_sources_mismatch_on_past_day_stops(self, root: Path) -> None:
         """
         목적: 첫 판(새 파일)은 KRX ↔ 야후 원본가 완전 일치를 전 기간에 건다 — 과거 날도 1원 다르면 멈춘다(Q34)
@@ -1176,7 +1425,9 @@ class TestDomestic:
 
         # Then
         assert result.stopped
-        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [("069500", DAYS[1], Check.KR_TWO_SOURCES)]
+        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [
+            ("069500", DAYS[1], Check.KR_TWO_SOURCES)
+        ]
         assert _snapshot(root) == before
 
     def test_base_rate_mismatch_stops(self, root: Path) -> None:
@@ -1251,6 +1502,7 @@ class TestCoin:
     def btc_root(self, root: Path) -> Path:
         save_prices(_table(BTC_CLOSES[:EXISTING_ROWS]), root / BTC_RAW)
         save_series(_value_series(BTC_CLOSES[:EXISTING_ROWS]), root / BTC_PRICE, decimals=6)
+        _sync_edition(root, BTC_RAW, BTC_PRICE)
         return root
 
     def test_appends_both_sources(self, btc_root: Path) -> None:

@@ -69,9 +69,7 @@ def read_list_file(path: Path) -> list[str]:
         if entry in entries:
             raise ValueError(f"{path} {line_number}행: {entry} 가 두 번 적혔습니다(중복)")
         if pure.name in names:
-            raise ValueError(
-                f"{path} {line_number}행: {entry} 와 {names[pure.name]} 가 받는 폴더에서 같은 이름 {pure.name} 이 됩니다"
-            )
+            raise ValueError(f"{path} {line_number}행: {entry} 와 {names[pure.name]} 가 받는 폴더에서 같은 이름 {pure.name} 이 됩니다")
         names[pure.name] = entry
         entries.append(entry)
     return entries
@@ -151,7 +149,9 @@ def export_files(
         KEY_CUTOFF: edition[KEY_CUTOFF],
         KEY_FILES: {source.name: files[source.as_posix()] for source in sources},
     }
-    (destination / EDITION_FILE_NAME).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (destination / EDITION_FILE_NAME).write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return ExportResult(copied=tuple(copied), state=state)
 
 

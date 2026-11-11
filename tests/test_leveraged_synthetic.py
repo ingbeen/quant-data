@@ -387,7 +387,7 @@ class TestSimulationStopsAtListing:
     def test_values_equal_full_period_simulation(self, tmp_path: Path):
         """
         목적: 상장일까지만 굴린 합성이 전 기간을 굴린 합성과 값이 정확히 같다 — 시뮬레이션은 그날까지의 기초만 보고,
-              이음매 비율은 이음매 날 값으로 정해진다. 다르면 옮긴 합성이 quant 의 합성과 어긋난다(Phase 2 대조)
+              이음매 비율은 이음매 날 값으로 정해진다. 다르면 옮긴 합성이 quant 의 합성과 어긋난다(시세_받기_판정.md 6.8)
 
         Given: 위 기초 · 실물, 상장 뒤 달까지 덮는 금리(전 기간 시뮬레이션이 돌 수 있게)
         When: build_leveraged_synthetics 의 합성 ↔ 전 기간 simulate_leveraged → build_leveraged_synthetic

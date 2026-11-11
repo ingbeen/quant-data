@@ -16,7 +16,7 @@ from pathlib import Path
 
 from quant_data.catalog import CATALOG
 from quant_data.cli import cli_exception_handler
-from quant_data.constants import EDITION_PATH
+from quant_data.constants import EDITION_PATH, REPO_ROOT
 from quant_data.edition import KEY_CUTOFF, read_edition
 from quant_data.leveraged.monthly_data import fetch_ffr_monthly
 from quant_data.logger import get_logger
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-fetch",
         action="store_true",
-        help="받지 않고 지금 파일로 가공 · 판 요약만 한다 (기준일은 판 요약의 것, 판 요약이 없으면 --end)",
+        help="받지 않고 지금 파일로 가공 · 판 요약만 한다 (기준일은 판 요약의 것)",
     )
     return parser.parse_args()
 
@@ -68,14 +68,12 @@ def _parse_date(text: str) -> date:
 
 
 def _cutoff_without_fetch(root: Path, end: date | None) -> date:
-    """받지 않는 갱신의 기준일 — 판 요약의 기준일을 그대로 쓴다. 판 요약이 없을 때(첫 판)만 --end 로 정한다."""
-    previous = read_edition(root / EDITION_PATH)
-    if previous is None:
-        if end is None:
-            raise ValueError("판 요약이 없는 첫 판은 --end 로 기준일(지금 파일의 끝날)을 주세요")
-        return end
+    """받지 않는 갱신의 기준일 — 판 요약의 기준일을 그대로 쓴다."""
     if end is not None:
         raise ValueError("받지 않는 갱신은 기준일을 바꾸지 않습니다 — --end 를 빼고 실행하세요")
+    previous = read_edition(root / EDITION_PATH)
+    if previous is None:
+        raise ValueError(f"판 요약({EDITION_PATH})이 없습니다 — 받지 않는 갱신은 판 요약의 기준일을 씁니다. git 이력에서 되살리세요")
     return date.fromisoformat(previous[KEY_CUTOFF])
 
 
@@ -86,7 +84,7 @@ def main() -> int:
         종료 코드 (0: 썼음, 1: 멈춤 · 실패 — 아무 파일도 쓰지 않음)
     """
     args = parse_args()
-    root = Path.cwd()
+    root = REPO_ROOT
     now = datetime.now().astimezone()
     fetch = not args.no_fetch
     cutoff_date = resolve_cutoff_date(args.end, now) if fetch else _cutoff_without_fetch(root, args.end)

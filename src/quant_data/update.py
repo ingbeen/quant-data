@@ -195,15 +195,16 @@ def run_update(
 
     Raises:
         ValueError: 표 밖 · 고정 자료 이름, 두 옵션에 같은 이름, fetch=False 에 옵션, 받는 함수가 없는 종류 · KRX 종류가
-            고정이 아님, 짝이 표에 없음, 판 요약에 있던 고정 자료 파일이 없음, fetch=False 인데 처음 받을 고정 자료가 있음 —
-            모두 받기 전에
+            고정이 아님, 짝이 표에 없음, 판 요약과 표의 데이터 파일이 어긋남(판 요약 없음 · 빠진 파일 · 목록 밖 파일 ·
+            첫날 · 끝날 · 행 수), fetch=False 인데 처음 받을 고정 자료가 있음 — 모두 받기 전에
         FileNotFoundError: 패스 목록이 없을 때
     """
     by_name = {dataset.name: dataset for dataset in catalog}
     _check_catalog(catalog, by_name)
     _check_options(by_name, exclude, accept, fetch)
     previous = read_edition(root / EDITION_PATH)
-    first_fetch = _first_fetch_names(root, catalog, previous)
+    _check_edition_matches_files(root, catalog, previous)
+    first_fetch = _first_fetch_names(root, catalog)
     if not fetch and first_fetch:
         raise ValueError(f"처음 받을 고정 자료가 있어 받지 않는 갱신(--no-fetch)을 할 수 없습니다: {sorted(first_fetch)}")
     pass_list = load_pass_list(root / PASS_LIST_PATH)
@@ -216,7 +217,10 @@ def run_update(
             outcomes[dataset.name] = _fetch_and_judge(dataset, fetchers, root, cutoff_date, dataset.name in accept)
 
     excluded = tuple(name for name in by_name if name in exclude)
-    accepted = tuple(name for name in by_name if name in accept)
+    # --accept 를 줬어도 비정상이 아니었으면 덮어쓰지 않았으므로 받아들인 자료가 아님
+    accepted = tuple(
+        name for name, outcome in outcomes.items() if any(file.status == STATUS_ACCEPTED for file in outcome.files)
+    )
     abnormal = tuple(file.abnormal for o in outcomes.values() for file in o.files if file.abnormal is not None)
     failures = tuple(remaining_failures(_new_day_failures(by_name, outcomes, root), pass_list))
     if abnormal or failures:
@@ -239,14 +243,14 @@ def _check_catalog(catalog: Sequence[Dataset], by_name: Mapping[str, Dataset]) -
         if dataset.method is not Method.FIXED and dataset.kind not in _FETCHABLE_KINDS:
             raise ValueError(f"{dataset.name}: 「{dataset.kind.value}」 는 받는 함수가 없어 고정으로만 둘 수 있습니다")
         if dataset.method is not Method.FIXED and dataset.kind in _FIXED_ONLY_KINDS:
-            raise ValueError(
-                f"{dataset.name}: 「{dataset.kind.value}」 는 다시 받을 때의 판정이 없어 고정(첫 판만 받음)으로만 둘 수 있습니다"
-            )
+            raise ValueError(f"{dataset.name}: 「{dataset.kind.value}」 는 다시 받을 때의 판정이 없어 고정(첫 판만 받음)으로만 둘 수 있습니다")
         if dataset.pair is not None and dataset.pair not in by_name:
             raise ValueError(f"{dataset.name} 의 짝 {dataset.pair} 가 자료별 갱신 방식 표에 없습니다")
 
 
-def _check_options(by_name: Mapping[str, Dataset], exclude: Collection[str], accept: Collection[str], fetch: bool) -> None:
+def _check_options(
+    by_name: Mapping[str, Dataset], exclude: Collection[str], accept: Collection[str], fetch: bool
+) -> None:
     if not fetch and (exclude or accept):
         raise ValueError("받지 않는 갱신(--no-fetch)에는 --exclude · --accept 를 쓸 수 없습니다 — 판정할 응답이 없습니다")
     both = sorted(set(exclude) & set(accept))
@@ -261,17 +265,58 @@ def _check_options(by_name: Mapping[str, Dataset], exclude: Collection[str], acc
             raise ValueError(f"{option} 의 {fixed} 는 고정 자료라 받지 않습니다 — 고정 자료에는 쓸 수 없습니다")
 
 
-def _first_fetch_names(root: Path, catalog: Sequence[Dataset], previous: Mapping[str, object] | None) -> set[str]:
+def _check_edition_matches_files(root: Path, catalog: Sequence[Dataset], previous: Mapping[str, object] | None) -> None:
     """
-    이번에 첫 판으로 받을 고정 자료 — 파일이 모두 없고 판 요약에 오른 적 없는 것.
+    판 요약과 표의 데이터 파일이 정확히 맞는지 받기 전에 본다 — 받든 안 받든.
+
+    갱신이 성공하면 판 요약은 그때 쓴 파일로 만들어지므로 정상이면 늘 맞는다. 어긋남(판 요약 없음 · 판 요약에 있는데
+    파일 없음 · 판 요약에 없는데 파일 있음 · 첫날 · 끝날 · 행 수가 다름)은 파일이나 판 요약만 지웠거나 옛 판으로
+    되살린 것이고, 그대로 두면 빠지거나 짧아진 파일이 판정 규칙 ① · ② 없이 「새로」 · 「첫 판」으로 채워진다.
+    표에 새로 더해 파일도 판 요약 항목도 없는 자료는 맞는 것으로 본다(첫 판으로 받는다).
 
     Raises:
-        ValueError: 판 요약에 있던 고정 파일이 없을 때(지운 파일을 새 데이터로 조용히 바꾸지 않는다), 일부 파일만 있을 때
+        ValueError: 어긋난 파일이 있을 때
     """
-    listed = previous.get(KEY_FILES, {}) if previous is not None else {}
-    listed_paths = set(listed) if isinstance(listed, dict) else set()
+    files = previous.get(KEY_FILES, {}) if previous is not None else {}
+    listed = files if isinstance(files, dict) else {}
+    period_keys = (KEY_FIRST_DAY, KEY_LAST_DAY, KEY_ROWS)
+    problems: list[str] = []
+    for dataset in catalog:
+        for path in dataset.files:
+            key = path.as_posix()
+            exists = (root / path).exists()
+            entry = listed.get(key)
+            if entry is None:
+                if exists:
+                    problems.append(f"{key}: 판 요약에 없는데 파일이 있음")
+                continue
+            if not exists:
+                problems.append(f"{key}: 판 요약에 있는데 파일이 없음")
+                continue
+            now = _period_entry(dataset.name, _read_for_period(dataset, root, path), "")
+            recorded = tuple(entry.get(k) for k in period_keys) if isinstance(entry, dict) else None
+            current = tuple(now[k] for k in period_keys)
+            if recorded != current:
+                problems.append(f"{key}: 판 요약 (첫날 · 끝날 · 행 수) {recorded}, 파일 {current}")
+    if problems:
+        missing_edition = f" — 판 요약({EDITION_PATH})이 없습니다" if previous is None else ""
+        shown = "\n".join(f"  {problem}" for problem in problems[:10])
+        more = f"\n  … 그 밖 {len(problems) - 10}개" if len(problems) > 10 else ""
+        raise ValueError(
+            f"판 요약과 데이터 파일이 어긋납니다{missing_edition} — 빠지거나 짧아진 파일이 판정 없이 채워지지 않게 받기 전에 "
+            f"멈춥니다. 판 요약과 데이터 파일을 같은 커밋에서 함께 git 이력에서 되살리세요:\n{shown}{more}"
+        )
+
+
+def _first_fetch_names(root: Path, catalog: Sequence[Dataset]) -> set[str]:
+    """
+    이번에 첫 판으로 받을 고정 자료 — 파일이 모두 없는 것. 판 요약에 있던 파일이 없으면 _check_edition_matches_files 가
+    먼저 멈추므로, 여기 오는 것은 판 요약에 오른 적 없는 자료다.
+
+    Raises:
+        ValueError: 일부 파일만 있을 때, 파일이 없는데 받는 함수가 없을 때
+    """
     first: set[str] = set()
-    restore: list[str] = []
     partial: list[str] = []
     for dataset in catalog:
         if dataset.method is not Method.FIXED:
@@ -279,15 +324,12 @@ def _first_fetch_names(root: Path, catalog: Sequence[Dataset], previous: Mapping
         missing = [path for path in dataset.files if not (root / path).exists()]
         if not missing:
             continue
-        restore += [path.as_posix() for path in missing if path.as_posix() in listed_paths]
         if len(missing) != len(dataset.files):
             partial.append(dataset.name)
         else:
             first.add(dataset.name)
-    if restore:
-        raise ValueError(f"고정 자료 파일이 없습니다: {restore} — 판 요약에 있던 다시 받지 않는 자료라 git 이력에서 되살리세요")
     if partial:
-        raise ValueError(f"고정 자료의 파일이 일부만 있습니다: {partial} — 남은 파일을 git 이력에서 되살리거나 모두 지운 뒤 다시 실행하세요")
+        raise ValueError(f"고정 자료의 파일이 일부만 있습니다: {partial} — 판 요약과 데이터 파일을 같은 커밋에서 함께 git 이력에서 되살리세요")
     unfetchable = sorted(name for name in first if _kind_of(catalog, name) not in _FETCHABLE_KINDS)
     if unfetchable:
         raise ValueError(f"고정 자료 파일이 없는데 받는 함수가 없습니다: {unfetchable} — git 이력에서 되살리세요")
@@ -307,7 +349,9 @@ def _fetch_and_judge(
         return _DatasetOutcome(dataset, files)
     if dataset.kind is Kind.FRED_MONTHLY:
         monthly = fetchers.ffr_monthly()
-        return _DatasetOutcome(dataset, tuple(_judge_monthly_file(dataset, path, monthly, root, accepted) for path in dataset.files))
+        return _DatasetOutcome(
+            dataset, tuple(_judge_monthly_file(dataset, path, monthly, root, accepted) for path in dataset.files)
+        )
     if dataset.kind is Kind.KRX_ETF:
         return _fetch_kr_etf(dataset, fetchers, root, cutoff_date, accepted)
     if dataset.kind is Kind.BITSTAMP:
@@ -350,7 +394,12 @@ def _judge_yahoo_file(
     dividends = response.events.dividends
     first_dividend: date | None = min(dividends.index) if len(dividends) else None
     status, abnormal = _status(dataset.name, path, revision.kind, revision.issues, revision, accepted)
-    logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.prices):,}행)")
+    # 야후가 틀린 배당을 넣어도 대조할 외부 출처가 없음 → 덮어쓴 까닭을 사람이 볼 곳은 이 줄뿐.
+    # 덮어쓰는 판정(설명되는 변화 · --accept 로 받아들인 비정상)에만 붙임 — 멈춘 비정상은 아무것도 덮어쓰지 않음
+    overwrites = revision.kind is RevisionKind.EXPLAINED or status == STATUS_ACCEPTED
+    matched = revision.applied if overwrites else ()
+    records = f" — 맞춘 기록: {' / '.join(matched)}" if matched else ""
+    logger.debug(f"{dataset.name} {path.name}: {revision.kind.value} ({len(revision.prices):,}행){records}")
     return _FileOutcome(path, _Form.PRICES, existing, round_prices(revision.prices), status, abnormal, first_dividend)
 
 
@@ -553,7 +602,9 @@ def _edition_entries(
             else:
                 if not (root / path).exists():
                     continue
-                entry = _period_entry(dataset.name, _read_for_period(dataset, root / path), _idle_status(dataset, exclude))
+                entry = _period_entry(
+                    dataset.name, _read_for_period(dataset, root, path), _idle_status(dataset, exclude)
+                )
                 carried = previous_files.get(path.as_posix(), {}) if isinstance(previous_files, dict) else {}
                 first_dividend = carried.get(KEY_FIRST_DIVIDEND) if isinstance(carried, dict) else None
             if dataset.kind in _YAHOO_KINDS:
@@ -573,13 +624,14 @@ def _idle_status(dataset: Dataset, exclude: Collection[str]) -> str:
     return STATUS_EXCLUDED if dataset.name in exclude else STATUS_NOT_FETCHED
 
 
-def _read_for_period(dataset: Dataset, path: Path) -> pd.DataFrame:
+def _read_for_period(dataset: Dataset, root: Path, path: Path) -> pd.DataFrame:
+    # 모양은 표의 상대 경로로 가름 — 국내 ETF 는 두 파일의 모양이 달라, 절대 경로를 넘기면 원본가를 계열로 읽음
     form = _form_of(dataset, path)
     if form is _Form.PRICES:
-        return load_prices(path)
+        return load_prices(root / path)
     if form is _Form.SERIES:
-        return load_series(path)
-    return pd.read_csv(path, dtype=str)
+        return load_series(root / path)
+    return pd.read_csv(root / path, dtype=str)
 
 
 def _period_entry(ticker: str, table: pd.DataFrame, status: str) -> dict[str, object]:

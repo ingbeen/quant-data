@@ -48,7 +48,9 @@ class _FakeResponse:
         return self._body
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, first: dict[str, Any], others: dict[str, dict[str, Any]] | None = None) -> list[str]:
+def _install(
+    monkeypatch: pytest.MonkeyPatch, first: dict[str, Any], others: dict[str, dict[str, Any]] | None = None
+) -> list[str]:
     """첫 요청은 first, others 에 든 URL 은 그 응답을 주는 대역 서버. 받은 URL 목록을 돌려준다."""
     requested: list[str] = []
 
@@ -181,7 +183,10 @@ class TestFetchSeries:
         Then: 07-18 · 07-19 두 행
         """
         # Given
-        _install(monkeypatch, {"data": [_row("2010-07-18", "0.0858"), _row("2010-07-19", "0.0808"), _row("2010-07-21", "0.07")]})
+        _install(
+            monkeypatch,
+            {"data": [_row("2010-07-18", "0.0858"), _row("2010-07-19", "0.0808"), _row("2010-07-21", "0.07")]},
+        )
 
         # When — 07-21 행은 끝나지 않은 날이라 빠지고, 07-19 끝은 하루 지연 안
         frame = fetch_coinmetrics_series(METRIC, _at("2010-07-21T00:30:00"))

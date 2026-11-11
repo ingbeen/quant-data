@@ -109,6 +109,19 @@ class TestNormalizeEtfRecords:
         with pytest.raises(ValueError, match="등락 구분"):
             normalize_etf_records([_record("2022/07/28", "32,245", "9", "210", "0.66")])
 
+    @pytest.mark.parametrize("rate", ["-", ""], ids=["dash", "blank"])
+    def test_empty_change_rate_raises(self, rate: str) -> None:
+        """
+        목적: 공식 등락률이 비면 멈춘다 — 빈 값(NaN)이면 기준가가 바뀐 날을 「안 바뀜」으로 판정해, 분배금만큼 틀린
+              국내 수정주가가 조용히 저장된다
+
+        Given: 공식 등락률 칸이 rate 인 행
+        When: normalize_etf_records
+        Then: ValueError (「등락률」)
+        """
+        with pytest.raises(ValueError, match="등락률"):
+            normalize_etf_records([_record("2022/07/28", "32,245", "1", "210", rate)])
+
     def test_missing_column_raises(self) -> None:
         """
         목적: 응답에 필요한 열이 없으면 멈춘다 — pykrx · KRX 가 열을 바꾸면 여기서 드러난다

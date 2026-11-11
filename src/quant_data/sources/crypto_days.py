@@ -46,11 +46,8 @@ def require_complete_range(dates: pd.Series, *, first_day: date, now: datetime, 
     latest_finished = unfinished_utc_day(now) - timedelta(days=1)
     if last < latest_finished - timedelta(days=publication_lag_days):
         raise ValueError(
-            f"받은 이력의 끝이 {last} 로, 끝난 마지막 날 {latest_finished} 에서 허용 지연 {publication_lag_days}일보다 멉니다 "
-            "— 뒤가 잘렸습니다"
+            f"받은 이력의 끝이 {last} 로, 끝난 마지막 날 {latest_finished} 에서 허용 지연 {publication_lag_days}일보다 멉니다 " "— 뒤가 잘렸습니다"
         )
     missing = pd.date_range(days.min(), days.max(), freq="D").difference(pd.DatetimeIndex(days))
     if len(missing) > 0:
-        raise ValueError(
-            f"받은 이력 사이에 빠진 날이 {len(missing)}일 있습니다 — 메우지 않습니다 (예시: {[d.date() for d in missing[:5]]})"
-        )
+        raise ValueError(f"받은 이력 사이에 빠진 날이 {len(missing)}일 있습니다 — 메우지 않습니다 (예시: {[d.date() for d in missing[:5]]})")

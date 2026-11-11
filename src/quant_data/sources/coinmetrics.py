@@ -62,9 +62,9 @@ def _request_page(url: str) -> dict[str, Any]:
         payload = json.loads(body)
     except json.JSONDecodeError:
         raise ValueError(f"Coin Metrics 응답이 JSON 이 아닙니다 - URL: {url}, 앞부분: {body[:200]}") from None
-    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):  # pyright: ignore[reportUnknownMemberType]
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
         raise ValueError(f"Coin Metrics 응답 모양이 예상과 다릅니다 (data 목록 없음) - URL: {url}, 앞부분: {body[:200]}")
-    return payload  # pyright: ignore[reportUnknownVariableType] — 서버가 준 JSON 그대로
+    return payload
 
 
 def _fetch_rows(metric: str) -> list[dict[str, Any]]:
@@ -116,7 +116,9 @@ def fetch_coinmetrics_series(metric: str, now: datetime) -> pd.DataFrame:
     validate_series(frame)
     invalid = ~(frame[COL_VALUE] > 0) | ~frame[COL_VALUE].map(math.isfinite)
     if invalid.any():
-        raise ValueError(f"유한한 양수가 아닌 값 발견(0 이하 · 무한대) - 지표: {metric}, 날짜: {frame.loc[invalid, COL_DATE].head().tolist()}")
+        raise ValueError(
+            f"유한한 양수가 아닌 값 발견(0 이하 · 무한대) - 지표: {metric}, 날짜: {frame.loc[invalid, COL_DATE].head().tolist()}"
+        )
     require_complete_range(frame[COL_DATE], first_day=FIRST_DAY, now=now, publication_lag_days=PUBLICATION_LAG_DAYS)
     logger.debug(f"Coin Metrics {metric}: {len(frame):,}행 받음 ({frame[COL_DATE].iloc[0]} ~ {frame[COL_DATE].iloc[-1]})")
     return frame

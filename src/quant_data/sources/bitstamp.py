@@ -57,7 +57,7 @@ def request_ohlc_page(start: int) -> list[dict[str, Any]]:
         raise ValueError(f"Bitstamp 응답 모양이 예상과 다릅니다 (data.ohlc 없음) - 시작 시각: {start}, 앞부분: {body[:200]}") from None
     if not isinstance(ohlc, list):
         raise ValueError(f"Bitstamp 응답의 data.ohlc 가 목록이 아닙니다 - 시작 시각: {start}")
-    return ohlc  # pyright: ignore[reportUnknownVariableType] — 서버가 준 JSON 그대로
+    return ohlc
 
 
 def parse_ohlc_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -76,7 +76,9 @@ def parse_ohlc_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     timestamps = frame["timestamp"].astype("int64")
     off_midnight = timestamps % DAY_SECONDS != 0
     if off_midnight.any():
-        raise ValueError(f"UTC 자정이 아닌 봉 시각이 있습니다 - 건수: {int(off_midnight.sum())}, 예시: {timestamps[off_midnight].head().tolist()}")
+        raise ValueError(
+            f"UTC 자정이 아닌 봉 시각이 있습니다 - 건수: {int(off_midnight.sum())}, 예시: {timestamps[off_midnight].head().tolist()}"
+        )
     frame = frame.assign(timestamp=timestamps).drop_duplicates(subset="timestamp", keep="first")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     parsed = pd.DataFrame({COL_DATE: [datetime.fromtimestamp(int(ts), tz=UTC).date() for ts in frame["timestamp"]]})

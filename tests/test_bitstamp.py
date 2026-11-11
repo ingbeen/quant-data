@@ -21,7 +21,12 @@ import pytest
 
 from quant_data.constants import COL_CLOSE, COL_DATE, COL_VOLUME, REQUIRED_COLUMNS
 from quant_data.sources import bitstamp
-from quant_data.sources.bitstamp import FIRST_TRADE_TIMESTAMP, fetch_bitstamp_history, fetch_ohlc_history, parse_ohlc_rows
+from quant_data.sources.bitstamp import (
+    FIRST_TRADE_TIMESTAMP,
+    fetch_bitstamp_history,
+    fetch_ohlc_history,
+    parse_ohlc_rows,
+)
 
 DAY = 86_400
 FIRST = FIRST_TRADE_TIMESTAMP  # 2011-08-18 00:00 UTC
@@ -30,7 +35,14 @@ FIRST = FIRST_TRADE_TIMESTAMP  # 2011-08-18 00:00 UTC
 def _row(timestamp: int, close: float, volume: float = 1.5) -> dict[str, str]:
     """Bitstamp 가 주는 모양의 하루치 행 — 값이 전부 문자열로 온다."""
     value = f"{close:.2f}"
-    return {"timestamp": str(timestamp), "open": value, "high": value, "low": value, "close": value, "volume": f"{volume:.8f}"}
+    return {
+        "timestamp": str(timestamp),
+        "open": value,
+        "high": value,
+        "low": value,
+        "close": value,
+        "volume": f"{volume:.8f}",
+    }
 
 
 class _FakeResponse:
@@ -197,7 +209,7 @@ class TestFetchOhlcHistory:
 
         # Given
         def fake_urlopen(request: object, timeout: float | None = None) -> None:
-            raise urllib.error.HTTPError("https://example.invalid", 429, "Too Many Requests", {}, None)  # type: ignore[arg-type]
+            raise urllib.error.HTTPError("https://example.invalid", 429, "Too Many Requests", {}, None)
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 

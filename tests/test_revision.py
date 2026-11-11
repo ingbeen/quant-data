@@ -12,7 +12,7 @@ revision 모듈 테스트 — 다시 받은 시세를 기존 파일과 견주는
 왜 중요한가요?
 야후는 수정 종가를 요청마다 미세하게 다르게 주고, 배당 기록을 늦게 넣거나 넣었다가 빼기도 한다.
 판정이 틀리면 흔들림이 받을 때마다 수만 행 diff 로 들어오거나, 배당이 빠진 시세가 조용히 덮어써진다
-(근거: quant docs/research/합성_시세_연장.md 결정 14). 분할은 사람이 운용사 공시와 비율을 맞춰 본 뒤에만 받아들인다.
+(근거: docs/research/시세_받기_판정.md 결정 14). 분할은 사람이 운용사 공시와 비율을 맞춰 본 뒤에만 받아들인다.
 """
 
 from datetime import date, datetime
@@ -130,6 +130,22 @@ class TestNewAndNoise:
         assert revision.existing_end is None
         assert revision.existing_rows == 0
         assert (revision.response_end, revision.response_rows) == (date(2026, 1, 16), 10)
+
+    def test_empty_existing_file_raises_with_git_guidance(self) -> None:
+        """
+        목적: 기존 파일에 행이 없으면 멈추고 git 이력에서 되살리라고 안내한다 — 「지우고 다시 받으라」를 따르면 갱신이
+              판 요약에 있던 파일이 없다고 다시 멈춰(update) 빠져나갈 길이 없다
+
+        Given: 머리줄만 있는 기존 표, 응답 10행
+        When: judge_revision
+        Then: ValueError (「git」)
+        """
+        # Given
+        existing = _prices(RAW_CLOSE).iloc[0:0]
+
+        # When & Then
+        with pytest.raises(ValueError, match="git"):
+            _judge(existing, _prices(RAW_CLOSE))
 
     def test_noise_keeps_existing_rows_and_appends_new_dates(self) -> None:
         """
@@ -874,12 +890,9 @@ class TestFormatAbnormalBlock:
 
         # Then
         lines = block.splitlines()
-        accept_line = lines.index(
-            "  --accept TQQQ = 응답으로 덮어씀(위 변화가 저장됨) · --exclude TQQQ = 기존 파일 그대로(새 날짜도 붙지 않음)"
-        )
+        accept_line = lines.index("  --accept TQQQ = 응답으로 덮어씀(위 변화가 저장됨) · --exclude TQQQ = 기존 파일 그대로(새 날짜도 붙지 않음)")
         assert lines[accept_line + 1] == (
-            "  분할로 보이는 변화(2026-01-12 · 2배)는 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 --accept 하세요"
-            " — --exclude 하면 다음 갱신에서도 다시 멈춥니다"
+            "  분할로 보이는 변화(2026-01-12 · 2배)는 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 --accept 하세요" " — --exclude 하면 다음 갱신에서도 다시 멈춥니다"
         )
 
     def test_block_without_dividends(self) -> None:

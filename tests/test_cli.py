@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import quant_data.cli as cli_module
 from quant_data.cli import cli_exception_handler
 from quant_data.constants import STORAGE_DIR
 
@@ -21,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
-def storage_dir_in_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """실행 위치를 `STORAGE_DIR` 폴더가 있는 임시 폴더로 옮긴다 (데코레이터의 실행 위치 확인을 통과시킨다)."""
+def repo_root_with_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """저장소 루트를 `STORAGE_DIR` 폴더가 있는 임시 폴더로 바꾼다 (데코레이터의 저장소 확인을 통과시킨다)."""
     (tmp_path / STORAGE_DIR).mkdir()
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_module, "REPO_ROOT", tmp_path)
     return tmp_path
 
 
@@ -189,21 +190,21 @@ class TestCliExceptionHandler:
         with pytest.raises(KeyError, match="logger"):
             main()
 
-    def test_outside_repo_root_returns_one_without_running(
+    def test_repo_without_storage_returns_one_without_running(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ):
         """
-        목적: 실행 위치에 `STORAGE_DIR` 폴더가 없으면 함수를 실행하지 않고 안내와 함께 실패하는지 검증
-              — 경로가 실행 위치 기준이라 저장소 루트 밖에서는 입력을 못 찾거나 결과가 엉뚱한 폴더에 생긴다
+        목적: 저장소 루트에 `STORAGE_DIR` 폴더가 없으면 함수를 실행하지 않고 안내와 함께 실패하는지 검증
+              — 데이터가 없는 저장소에서 갱신하면 모든 자료를 첫 판으로 받는다
 
-        Given: `STORAGE_DIR` 폴더가 없는 실행 위치
+        Given: `STORAGE_DIR` 폴더가 없는 저장소 루트
         When: @cli_exception_handler 데코레이터를 적용한 함수 실행
-        Then: 종료 코드 1, 함수 본문은 실행되지 않음, 예외 문구가 저장소 루트에서 실행하라고 안내
+        Then: 종료 코드 1, 함수 본문은 실행되지 않음, 예외 문구가 그 폴더가 없다고 안내
         """
         # Given
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
-        monkeypatch.chdir(elsewhere)
+        monkeypatch.setattr(cli_module, "REPO_ROOT", elsewhere)
         calls: list[str] = []
 
         @cli_exception_handler
@@ -221,7 +222,34 @@ class TestCliExceptionHandler:
         logged_errors = [record.exc_info[1] for record in caplog.records if record.exc_info]
         assert len(logged_errors) == 1
         assert isinstance(logged_errors[0], FileNotFoundError)
-        assert "저장소 루트에서 실행하세요" in str(logged_errors[0])
+        assert "폴더가 없습니다" in str(logged_errors[0])
+
+    def test_runs_from_any_working_directory(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """
+        목적: 실행 위치에 `STORAGE_DIR` 폴더가 없어도 저장소 루트에 있으면 실행한다 — 경로는 실행 위치가 아니라 저장소
+              루트 기준이라, 사용처 저장소의 세션에서 절대 경로로 불러도 된다
+
+        Given: `STORAGE_DIR` 폴더가 없는 실행 위치, 그 폴더가 있는 저장소 루트(픽스처)
+        When: @cli_exception_handler 데코레이터를 적용한 함수 실행
+        Then: 종료 코드 0, 함수 본문 실행됨
+        """
+        # Given
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        calls: list[str] = []
+
+        @cli_exception_handler
+        def main() -> int:
+            calls.append("ran")
+            return 0
+
+        # When
+        result = main()
+
+        # Then
+        assert result == 0
+        assert calls == ["ran"]
 
     def test_exception_info_logged(self, caplog):
         """

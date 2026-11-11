@@ -6,10 +6,9 @@ CLI 스크립트에서 공통으로 사용하는 예외 처리 데코레이터�
 import logging
 from collections.abc import Callable
 from functools import wraps
-from pathlib import Path
 from typing import Any
 
-from quant_data.constants import STORAGE_DIR
+from quant_data.constants import REPO_ROOT, STORAGE_DIR
 
 
 def cli_exception_handler(func: Callable[[], int]) -> Callable[[], int]:
@@ -19,8 +18,8 @@ def cli_exception_handler(func: Callable[[], int]) -> Callable[[], int]:
     모든 예외를 캐치하여 스택 트레이스를 포함한 에러 로그를 남기고 실패 코드(1)를 반환한다.
     로거는 함수가 정의된 모듈의 최상위 'logger' 변수를 쓴다(없으면 KeyError).
 
-    실행 위치에 `STORAGE_DIR` 폴더가 없으면 함수를 실행하지 않고 실패 코드를 반환한다 — 입력 · 결과 경로가
-    실행 위치 기준이라, 저장소 루트 밖에서 돌리면 입력을 못 찾거나 결과가 엉뚱한 폴더에 생긴다.
+    저장소 루트(`REPO_ROOT`)에 `STORAGE_DIR` 폴더가 없으면 함수를 실행하지 않고 실패 코드를 반환한다 — 데이터가 없는
+    저장소에서 갱신하면 모든 자료를 첫 판으로 받는다. 실행 위치는 보지 않는다(경로는 저장소 루트 기준).
 
     예외 메시지는 스택 트레이스에 포함되므로 별도로 출력하지 않아 중복을 방지한다.
 
@@ -44,8 +43,10 @@ def cli_exception_handler(func: Callable[[], int]) -> Callable[[], int]:
         logger: logging.Logger = func.__globals__["logger"]
 
         try:
-            if not STORAGE_DIR.is_dir():
-                raise FileNotFoundError(f"저장소 루트에서 실행하세요 — 현재 위치({Path.cwd()})에 '{STORAGE_DIR}' 폴더가 없습니다")
+            if not (REPO_ROOT / STORAGE_DIR).is_dir():
+                raise FileNotFoundError(
+                    f"저장소({REPO_ROOT})에 '{STORAGE_DIR}' 폴더가 없습니다 — quant-data 저장소를 데이터까지 받았는지 확인하세요"
+                )
             return func(*args, **kwargs)
 
         except Exception:

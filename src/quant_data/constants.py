@@ -6,6 +6,8 @@ from typing import Final
 # ============================================================
 # 저장 경로 — 저장소 루트 기준 상대 경로
 # ============================================================
+# 실행 위치가 아니라 이 파일 기준 — 사용처 저장소의 세션에서 절대 경로로 불러도 그 저장소에 쓰지 않게
+REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 # 판 요약 · 내보내기가 이 상대 경로를 파일 이름처럼 적는다 — 절대 경로면 공개 저장소에 로컬 경로가 올라간다
 STORAGE_DIR: Final = Path("storage")
 PRICES_DIR: Final = STORAGE_DIR / "prices"  # 시세 — 이름은 prices.price_path

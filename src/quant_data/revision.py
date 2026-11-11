@@ -4,7 +4,7 @@
 다시 받은 응답을 기존 파일과 견줘 셋으로 가른다 — 흔들림뿐(기존 행 그대로 + 새 날짜 행), 응답의 배당 기록으로
 설명되는 변화(응답으로 덮어씀), 그 밖(비정상 — --exclude · --accept 는 사람이 정한다). 분할은 기록과 맞아도
 비정상이다 — 사람이 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 받아들인다(결정 Q23). 기준값의 근거는
-docs/research/합성_시세_연장.md 결정 14.
+docs/research/시세_받기_판정.md 결정 14.
 """
 
 import math
@@ -115,7 +115,7 @@ def judge_revision(
     if response.empty:
         raise ValueError("받은 시세가 비어 있습니다 — 판정할 수 없습니다")
     if existing is not None and existing.empty:
-        raise ValueError("기존 시세 파일에 행이 없습니다 — 그 파일을 지우고 다시 받으세요")
+        raise ValueError("기존 시세 파일에 행이 없습니다 — git 이력에서 그 파일을 되살리세요")
     response = response.reset_index(drop=True)
     recent = _recent_dividends(events.dividends)
     response_end: date = response[COL_DATE].iloc[-1]
@@ -483,7 +483,6 @@ def format_abnormal_block(
         if revision.split_changes:
             splits = ", ".join(f"{day} · {ratio:g}배" for day, ratio in revision.split_changes)
             lines.append(
-                f"  분할로 보이는 변화({splits})는 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 --accept 하세요"
-                " — --exclude 하면 다음 갱신에서도 다시 멈춥니다"
+                f"  분할로 보이는 변화({splits})는 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 --accept 하세요" " — --exclude 하면 다음 갱신에서도 다시 멈춥니다"
             )
     return "\n".join(lines)
