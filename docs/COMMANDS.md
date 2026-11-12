@@ -38,6 +38,7 @@ poetry run python scripts/update.py --no-fetch
 
 ```bash
 python3 scripts/export.py --to ../quant/storage/stock
+python3 scripts/export.py --to ../verify-lab/storage/market
 ```
 
 ---
