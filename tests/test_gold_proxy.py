@@ -39,7 +39,7 @@ from quant_data.synthetic.gold_proxy import (
 
 REL_TOL = 1e-12
 
-# Perth Mint 보관 CSV 의 머리 다섯 줄 — 열 순서는 실제 파일과 다르게 둬 «열 이름으로» 찾는지 본다
+# Perth Mint 보관 CSV 의 헤더 다섯 줄 — 열 순서는 실제 파일과 다르게 둬 «열 이름으로» 찾는지 본다
 PERTH_HEADER = (
     "Market,Perth Mint Spot,Perth Mint Spot,Perth Mint Spot,Perth Mint Spot,Perth Mint Spot,Perth Mint Spot,Lease Rates\n"
     "Metal/Currency,Gold,Gold,Gold,Gold,Gold,Gold,6 Month\n"
@@ -96,7 +96,7 @@ class TestParsePerthMintGoldCsv:
 
     def test_reads_average_columns_by_label(self) -> None:
         """
-        목적: Average 열을 머리 다섯 줄의 이름으로 찾는다 — 열 순서가 달라도, High 칸이 앞에 있어도 Average 를 읽는다
+        목적: Average 열을 헤더 다섯 줄의 이름으로 찾는다 — 열 순서가 달라도, High 칸이 앞에 있어도 Average 를 읽는다
 
         Given: 열 순서가 실제와 다르고 High 칸에 다른 값이 든 CSV, 천 단위 쉼표가 든 호주달러 값
         When: parse_perth_mint_gold_csv
@@ -168,9 +168,9 @@ class TestParsePerthMintGoldCsv:
     )
     def test_changed_format_raises(self, header: str) -> None:
         """
-        목적: 형식이 바뀌면(필요한 Average 열이 없거나 머리 이름이 다르면) 멈춘다 — 엉뚱한 열을 금값으로 읽지 않는다
+        목적: 형식이 바뀌면(필요한 Average 열이 없거나 헤더 이름이 다르면) 멈춘다 — 엉뚱한 열을 금값으로 읽지 않는다
 
-        Given: 달러 Average 열이 없거나 머리 이름이 바뀐 CSV
+        Given: 달러 Average 열이 없거나 헤더 이름이 바뀐 CSV
         When: parse_perth_mint_gold_csv
         Then: ValueError
         """
@@ -243,7 +243,7 @@ class TestParseFredDailyCsv:
     @pytest.mark.parametrize(
         ("text", "keyword"),
         [
-            ("observation_date,DEXJPUS\n2024-01-02,140.1\n", "머리"),
+            ("observation_date,DEXJPUS\n2024-01-02,140.1\n", "헤더"),
             (FRED_HEADER + "2024-01-02,abc\n", "숫자"),
             (FRED_HEADER + "2024-01-02,0\n", "0 이하"),
             (FRED_HEADER + "2024-01-03,0.68\n2024-01-02,0.67\n", "오름차순"),
@@ -254,7 +254,7 @@ class TestParseFredDailyCsv:
     )
     def test_bad_input_raises(self, text: str, keyword: str) -> None:
         """
-        목적: 머리 · 숫자 · 0 이하 · 순서 · 날짜 형식 · 빈 응답은 멈춘다
+        목적: 헤더 · 숫자 · 0 이하 · 순서 · 날짜 형식 · 빈 응답은 멈춘다
 
         Given: 잘못된 FRED CSV
         When: parse_fred_daily_csv
@@ -281,7 +281,7 @@ FX_ROWS = [
     (date(2024, 1, 3), 0.69),
     (date(2024, 1, 4), 0.70),
     (date(2024, 1, 5), 0.71),
-    # 01-08 은 미국 은행 휴일 → 그 미국 날짜의 호주달러 판 행 없음
+    # 01-08 은 미국 은행 휴일 → 그 미국 날짜의 호주달러 값 행 없음
     (date(2024, 1, 9), 0.72),
     (date(2024, 1, 10), 0.73),
 ]

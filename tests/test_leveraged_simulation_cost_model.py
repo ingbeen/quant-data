@@ -336,7 +336,7 @@ class TestCapSpreadThrough:
 
     def test_input_not_mutated(self):
         """
-        목적: 입력 딕셔너리를 바꾸지 않는다 — 같은 모형 값을 다른 판(상한 없는 판)이 같이 쓴다
+        목적: 입력 딕셔너리를 바꾸지 않는다 — 같은 모형 값을 다른 시나리오(상한 없음)가 같이 쓴다
 
         Given: 상한을 넘는 값이 든 딕셔너리
         When: cap_spread_through

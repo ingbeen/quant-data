@@ -1,10 +1,10 @@
 """
-series 모듈 테스트 — 하루 한 값인 계열(국내 지수 종가 · NAV · Coin Metrics · 국내 ETF 의 야후 분배 기록)
+series 모듈 테스트 — 일별 시계열(국내 지수 종가 · NAV · Coin Metrics · 국내 ETF 의 야후 분배 기록)
 
 이 파일은 무엇을 검증하나요?
 1. 저장 → 읽기가 날짜 · 값을 그대로 되돌리고, 저장 자릿수로 반올림하는가?
 2. 중복 날짜 · 결측 값은 지우거나 메우지 않고 멈추는가? 행이 없는 계열(분배 기록이 0건인 ETF)은 받는가?
-3. 덧붙이기 판정: 지난 날 값이 흔들림 안이면 기존 행 그대로에 새 날만 붙이고, 값이 바뀌거나 지난 날이 사라지거나
+3. 덧붙이기 판정: 지난 날 값이 노이즈 안이면 기존 행 그대로에 새 날만 붙이고, 값이 바뀌거나 지난 날이 사라지거나
    기존 끝날 앞에 새 날이 생기면 비정상인가? (판정 원칙)
 
 왜 중요한가요?
@@ -55,7 +55,7 @@ class TestSaveAndLoad:
         """
         목적: 행이 없는 계열도 저장 · 읽기가 된다 (경계) — 분배를 한 번도 안 한 ETF 의 분배 기록이 그렇다(114800 등)
 
-        Given: 머리만 있는 표
+        Given: 헤더만 있는 표
         When: save_series → load_series
         Then: 0행, 열 Date · Value
         """
@@ -125,7 +125,7 @@ class TestJudgeSeriesAppend:
 
     def test_unchanged_past_appends_new_days(self) -> None:
         """
-        목적: 지난 날 값이 흔들림 안이면 기존 행은 글자 그대로 두고 기존 끝날 뒤의 새 날만 붙인다
+        목적: 지난 날 값이 노이즈 안이면 기존 행은 글자 그대로 두고 기존 끝날 뒤의 새 날만 붙인다
 
         Given: 기존 2일 (1.0 · 2.0), 응답 4일 (1.00004 · 2.0 · 3.0 · 4.0) — 첫 값은 자릿수 4 의 반 단위 안
         When: judge_series_append
@@ -154,7 +154,7 @@ class TestJudgeSeriesAppend:
 
         Given: 기존 2일 (1.0 · 2.0) 과 바뀐 응답
         When: judge_series_append
-        Then: 바뀜 · 사라짐은 ABNORMAL 과 원인 줄, 중복은 ValueError
+        Then: 바뀜 · 사라짐은 ABNORMAL 과 진단 줄, 중복은 ValueError
         """
         # Given
         existing = _series([1.0, 2.0])

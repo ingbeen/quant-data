@@ -5,7 +5,7 @@ ETF 호가 단위 5원으로 맞춘다 — docs/research/시세_받기_판정.md
 기준가가 바뀐 날은 공식 등락률이 원본가 하루 변화와 표기 자릿수의 반 단위 밖인 날이다 — 대비만 어긋난 날(2005년
 069500 4일)은 기준가 칸이 틀린 것이라 바뀐 날로 보지 않는다.
 기준가가 내려간 날은 같은 날 야후 분배금이 KRX 차이보다 0 ~ 4원 크면 그 금액(정확한 값)을, 아니면 KRX 차이를 쓴다.
-야후 기록과 어긋난 날은 값을 바꾸지 않고 판 요약에 적는다(결정 Q28).
+야후 기록과 어긋난 날은 값을 바꾸지 않고 매니페스트에 적는다(결정 Q28).
 """
 
 import math
@@ -50,7 +50,7 @@ def official_rate_matches_base(close: float, base: float, official_rate: float) 
 
 @dataclass(frozen=True)
 class KrAdjusted:
-    """국내 수정주가 — prices 는 REQUIRED_COLUMNS 표, notes 는 야후 분배 대조의 어긋남(날짜순, 판 요약에 적는다)."""
+    """국내 수정주가 — prices 는 REQUIRED_COLUMNS 표, notes 는 야후 분배 대조의 어긋남(날짜순, 매니페스트에 적는다)."""
 
     prices: pd.DataFrame
     notes: tuple[str, ...]

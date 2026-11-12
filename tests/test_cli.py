@@ -195,7 +195,7 @@ class TestCliExceptionHandler:
     ):
         """
         목적: 저장소 루트에 `STORAGE_DIR` 폴더가 없으면 함수를 실행하지 않고 안내와 함께 실패하는지 검증
-              — 데이터가 없는 저장소에서 갱신하면 모든 자료를 첫 판으로 받는다
+              — 데이터가 없는 저장소에서 갱신하면 모든 자료를 최초 수집한다
 
         Given: `STORAGE_DIR` 폴더가 없는 저장소 루트
         When: @cli_exception_handler 데코레이터를 적용한 함수 실행

@@ -2,16 +2,16 @@
 revision 모듈 테스트 — 다시 받은 시세를 기존 파일과 견주는 판정 (판정 규칙 ①)
 
 이 파일은 무엇을 검증하나요?
-1. 흔들림뿐이면 기존 행을 그대로 두고 새 날짜 행만 붙이는가?
-2. 응답의 배당 기록으로 설명되는 변화면 응답으로 덮어쓰는가? (기존 파일이 잘라낸 날의 배당을 이미 반영한 경우 포함)
+1. 노이즈뿐이면 기존 행을 그대로 두고 새 날짜 행만 붙이는가?
+2. 응답의 배당 기록과 맞는 변화(배당 반영)면 응답으로 덮어쓰는가? (기존 파일이 잘라낸 날의 배당을 이미 반영한 경우 포함)
 3. 그 밖(배당 빠짐 · 금액 바뀜 · 기록 없는 변화 · 일부 열만 바뀜 · 날짜 변화 · 작은 변화의 누적)은 비정상인가?
-4. 분할은 기록과 맞아도 비정상이고 원인 줄에 「분할로 보이는 변화」를 적는가? (결정 Q23)
+4. 분할은 기록과 맞아도 비정상이고 진단 줄에 「분할로 보이는 변화」를 적는가? (결정 Q23)
 5. 원본가는 배당 기록으로 설명되지 않는가? (야후 원본가는 분할만 과거에 반영된다)
-6. 비정상 원인 블록이 짧고, 그대로 AI 에 붙여 넣을 수 있으며 --accept · --exclude 의 뜻을 적는가? (결정 Q16)
+6. 비정상 진단 출력이 짧고, 그대로 AI 에 붙여 넣을 수 있으며 --accept · --exclude 의 뜻을 적는가? (결정 Q16)
 
 왜 중요한가요?
 야후는 수정 종가를 요청마다 미세하게 다르게 주고, 배당 기록을 늦게 넣거나 넣었다가 빼기도 한다.
-판정이 틀리면 흔들림이 받을 때마다 수만 행 diff 로 들어오거나, 배당이 빠진 시세가 조용히 덮어써진다
+판정이 틀리면 노이즈가 받을 때마다 수만 행 diff 로 들어오거나, 배당이 빠진 시세가 조용히 덮어써진다
 (근거: docs/research/시세_받기_판정.md 결정 14). 분할은 사람이 운용사 공시와 비율을 맞춰 본 뒤에만 받아들인다.
 """
 
@@ -38,7 +38,7 @@ RAW_CLOSE: list[float] = [100.0 + i for i in range(10)]
 
 
 def _factors(dividends: dict[date, float] | None = None, splits: dict[date, float] | None = None) -> np.ndarray:
-    """야후 방식의 누적 조정 비율 — 배당락일 앞 행에 (1 − 배당 ÷ 전날 원시 종가), 분할일 앞 행에 1 ÷ 배수를 곱한다."""
+    """야후 방식의 누적 조정 비율 — 배당락일 앞 행에 (1 − 배당 ÷ 전날 원본 종가), 분할일 앞 행에 1 ÷ 배수를 곱한다."""
     factors = np.ones(len(DATES))
     for day, amount in (dividends or {}).items():
         i = DATES.index(day)
@@ -65,7 +65,7 @@ def _prices(closes: np.ndarray | list[float], dates: list[date] | None = None) -
 
 
 def _adjusted(dividends: dict[date, float] | None = None, splits: dict[date, float] | None = None) -> pd.DataFrame:
-    """원시 종가에 야후 방식의 조정 비율을 곱한 시세."""
+    """원본 종가에 야후 방식의 조정 비율을 곱한 시세."""
     return _prices(np.array(RAW_CLOSE) * _factors(dividends, splits))
 
 
@@ -108,7 +108,7 @@ def _judge(
 
 
 class TestNewAndNoise:
-    """기존 파일이 없을 때와 흔들림뿐일 때"""
+    """기존 파일이 없을 때와 노이즈뿐일 때"""
 
     def test_new_file_without_existing(self) -> None:
         """
@@ -134,9 +134,9 @@ class TestNewAndNoise:
     def test_empty_existing_file_raises_with_git_guidance(self) -> None:
         """
         목적: 기존 파일에 행이 없으면 멈추고 git 이력에서 되살리라고 안내한다 — 「지우고 다시 받으라」를 따르면 갱신이
-              판 요약에 있던 파일이 없다고 다시 멈춰(update) 빠져나갈 길이 없다
+              매니페스트에 있던 파일이 없다고 다시 멈춰(update) 빠져나갈 길이 없다
 
-        Given: 머리줄만 있는 기존 표, 응답 10행
+        Given: 헤더 줄만 있는 기존 표, 응답 10행
         When: judge_revision
         Then: ValueError (「git」)
         """
@@ -149,9 +149,9 @@ class TestNewAndNoise:
 
     def test_noise_keeps_existing_rows_and_appends_new_dates(self) -> None:
         """
-        목적: 흔들림뿐이면 기존 행은 한 글자도 바꾸지 않고 응답의 새 날짜 행만 붙인다 — 받을 때마다 생기던 diff 를 막는다
+        목적: 노이즈뿐이면 기존 행은 한 글자도 바꾸지 않고 응답의 새 날짜 행만 붙인다 — 받을 때마다 생기던 diff 를 막는다
 
-        Given: 기존 8행(6자리), 응답 10행 = 같은 시세에 상대 ±4e-6 흔들림 (관측 최대 4.2e-6 수준)
+        Given: 기존 8행(6자리), 응답 10행 = 같은 시세에 상대 ±4e-6 노이즈 (관측 최대 4.2e-6 수준)
         When: judge_revision
         Then: NOISE, 저장할 표 = 기존 8행 + 응답의 9 · 10번째 행
         """
@@ -174,7 +174,7 @@ class TestNewAndNoise:
     )
     def test_noise_tolerance_boundary(self, relative_change: float, expected_kind: RevisionKind) -> None:
         """
-        목적: 흔들림 상한(상대 2e-5)의 양쪽 — 아래면 흔들림, 위면 기록 없는 변화라 비정상
+        목적: 허용 오차(상대 2e-5)의 양쪽 — 아래면 노이즈, 위면 기록 없는 변화라 비정상
 
         Given: 기존 10행, 응답은 다섯째 행만 네 가격 모두 relative_change 만큼 다르다
         When: judge_revision
@@ -193,9 +193,9 @@ class TestNewAndNoise:
 
     def test_small_prices_use_rounding_floor(self) -> None:
         """
-        목적: 아주 작은 가격은 6자리 반올림 반 단위까지 흔들림으로 본다 — 상대 차만 보면 반올림 잡음을 변화로 읽는다
+        목적: 아주 작은 가격은 6자리 반올림 반 단위까지 노이즈로 본다 — 상대 차만 보면 반올림 잡음을 변화로 읽는다
 
-        Given: 종가 0.010 ~ 0.019 (6자리로 저장), 응답 = 상대 +4e-5 (상한의 2배지만 절대 차 4e-7 ~ 7.7e-7 — 반 단위 5e-7 + 상한 몫 안)
+        Given: 종가 0.010 ~ 0.019 (6자리로 저장), 응답 = 상대 +4e-5 (상한의 2배지만 절대 차 4e-7 ~ 7.7e-7 — 반 단위 5e-7 + 허용 오차분 안)
         When: judge_revision
         Then: NOISE
         """
@@ -211,8 +211,8 @@ class TestNewAndNoise:
         assert revision.kind is RevisionKind.NOISE
 
 
-class TestExplained:
-    """응답의 배당 기록으로 설명되는 변화 → 응답으로 덮어쓴다"""
+class TestDividendAdjusted:
+    """배당 반영 — 응답의 배당 기록과 맞는 변화는 응답으로 덮어쓴다"""
 
     def test_dividend_added_inside_overlap(self) -> None:
         """
@@ -220,7 +220,7 @@ class TestExplained:
 
         Given: 기존 = 배당 없는 10행, 응답 = 2026-01-12 배당 $0.50 이 반영된 10행과 그 기록
         When: judge_revision
-        Then: EXPLAINED, 저장할 표 = 응답, 반영 기록에 그날 · 금액
+        Then: DIVIDEND_ADJUSTED, 저장할 표 = 응답, 반영 기록에 그날 · 금액
         """
         # Given
         dividend = {DATES[5]: 0.5}
@@ -231,7 +231,7 @@ class TestExplained:
         revision = _judge(existing, response, _events(dividends=dividend))
 
         # Then
-        assert revision.kind is RevisionKind.EXPLAINED
+        assert revision.kind is RevisionKind.DIVIDEND_ADJUSTED
         pd.testing.assert_frame_equal(revision.prices, response)
         assert any("2026-01-12" in line and "$0.500" in line for line in revision.applied)
 
@@ -241,7 +241,7 @@ class TestExplained:
 
         Given: 기존 8행(01-05 ~ 01-14), 응답 10행 = 2026-01-16 배당 $0.50 이 반영된 시세와 그 기록
         When: judge_revision
-        Then: EXPLAINED, 반영 기록에 2026-01-16
+        Then: DIVIDEND_ADJUSTED, 반영 기록에 2026-01-16
         """
         # Given
         dividend = {DATES[9]: 0.5}
@@ -252,7 +252,7 @@ class TestExplained:
         revision = _judge(existing, response, _events(dividends=dividend))
 
         # Then
-        assert revision.kind is RevisionKind.EXPLAINED
+        assert revision.kind is RevisionKind.DIVIDEND_ADJUSTED
         assert any("2026-01-16" in line for line in revision.applied)
 
     def test_dividend_in_trimmed_days_already_in_existing(self) -> None:
@@ -262,7 +262,7 @@ class TestExplained:
 
         Given: 기존 6행(~ 01-12) = 01-13 배당 $0.50 이 반영된 시세, 응답 10행 = 01-13 $0.50 · 01-15 $0.40 이 반영된 시세와 두 기록
         When: judge_revision
-        Then: EXPLAINED, 반영 기록에 01-15 만 (01-13 은 기존이 이미 반영)
+        Then: DIVIDEND_ADJUSTED, 반영 기록에 01-15 만 (01-13 은 기존이 이미 반영)
         """
         # Given
         first = {DATES[6]: 0.5}
@@ -274,7 +274,7 @@ class TestExplained:
         revision = _judge(existing, response, _events(dividends=both))
 
         # Then
-        assert revision.kind is RevisionKind.EXPLAINED
+        assert revision.kind is RevisionKind.DIVIDEND_ADJUSTED
         assert any("2026-01-15" in line for line in revision.applied)
         assert not any("2026-01-13" in line for line in revision.applied)
 
@@ -285,7 +285,7 @@ class TestExplained:
 
         Given: 기존 8행(~ 01-14, 배당 없음), 응답 10행 = 01-08 $0.30 · 01-16 $0.50 이 반영된 시세와 두 기록
         When: judge_revision
-        Then: EXPLAINED, 반영 기록에 01-08 · 01-16 둘 다
+        Then: DIVIDEND_ADJUSTED, 반영 기록에 01-08 · 01-16 둘 다
         """
         # Given
         dividends = {DATES[3]: 0.3, DATES[9]: 0.5}
@@ -296,7 +296,7 @@ class TestExplained:
         revision = _judge(existing, response, _events(dividends=dividends))
 
         # Then
-        assert revision.kind is RevisionKind.EXPLAINED
+        assert revision.kind is RevisionKind.DIVIDEND_ADJUSTED
         assert any("2026-01-08" in line for line in revision.applied)
         assert any("2026-01-16" in line for line in revision.applied)
 
@@ -306,7 +306,7 @@ class TestExplained:
 
         Given: 기존 8행(~ 01-14), 응답 = 01-14 배당 $0.40 이 반영된 10행과 그 기록
         When: judge_revision
-        Then: EXPLAINED, 반영 기록에 「2026-01-14」 · 「이전 7행」
+        Then: DIVIDEND_ADJUSTED, 반영 기록에 「2026-01-14」 · 「이전 7행」
         """
         # Given
         dividend = {DATES[7]: 0.4}
@@ -317,7 +317,7 @@ class TestExplained:
         revision = _judge(existing, response, _events(dividends=dividend))
 
         # Then
-        assert revision.kind is RevisionKind.EXPLAINED
+        assert revision.kind is RevisionKind.DIVIDEND_ADJUSTED
         assert any("2026-01-14" in line and "이전 7행" in line for line in revision.applied)
 
 
@@ -327,13 +327,13 @@ class TestSplitIsAbnormal:
     @pytest.mark.parametrize(("ratio", "ratio_text"), [(2.0, "2배"), (0.2, "0.2배")])
     def test_split_record_matching_change_is_abnormal(self, ratio: float, ratio_text: str) -> None:
         """
-        목적: 새 분할 기록(액면분할 2배 · 역분할 1:5)이 그날 앞 가격의 변화와 정확히 맞아도 비정상이고, 원인 줄에
+        목적: 새 분할 기록(액면분할 2배 · 역분할 1:5)이 그날 앞 가격의 변화와 정확히 맞아도 비정상이고, 진단 줄에
               분할로 보이는 날짜 · 비율을 적는다 — 하루 급등락 검사는 2:1 분할 날 시장이 오르면 −49.x% 로 빠져나가
               분할 감지로 믿지 않는다
 
         Given: 기존 = 분할 전 10행, 응답 = 2026-01-12 분할이 반영된 10행과 그 기록
         When: judge_revision
-        Then: ABNORMAL, 저장할 표 = 응답, 원인 줄에 「분할로 보이는 변화: 2026-01-12 · {배수} (야후 기록)」,
+        Then: ABNORMAL, 저장할 표 = 응답, 진단 줄에 「분할로 보이는 변화: 2026-01-12 · {배수} (야후 기록)」,
               split_changes = ((2026-01-12, 배수),)
         """
         # Given
@@ -352,11 +352,11 @@ class TestSplitIsAbnormal:
 
     def test_split_after_existing_end_is_abnormal(self) -> None:
         """
-        목적: 기존 끝날 뒤의 분할도 겹친 행 전체를 1 ÷ 배수로 바꾼다 — 그 비율이 기록과 맞아도 비정상이고 같은 원인 줄을 적는다
+        목적: 기존 끝날 뒤의 분할도 겹친 행 전체를 1 ÷ 배수로 바꾼다 — 그 비율이 기록과 맞아도 비정상이고 같은 진단 줄을 적는다
 
         Given: 기존 8행(~ 01-14), 응답 10행 = 2026-01-16 2배 분할이 반영된 시세와 그 기록
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「분할로 보이는 변화: 2026-01-16 · 2배 (야후 기록)」
+        Then: ABNORMAL, 진단 줄에 「분할로 보이는 변화: 2026-01-16 · 2배 (야후 기록)」
         """
         # Given
         split = {DATES[9]: 2.0}
@@ -371,14 +371,14 @@ class TestSplitIsAbnormal:
         assert any("분할로 보이는 변화: 2026-01-16 · 2배 (야후 기록)" in line for line in revision.issues)
         assert revision.split_changes == ((DATES[9], 2.0),)
 
-    def test_dividend_beside_split_is_still_explained_but_split_stops(self) -> None:
+    def test_dividend_beside_split_is_still_dividend_adjusted_but_split_stops(self) -> None:
         """
-        목적: 같은 응답에 배당과 분할이 함께 오면 배당은 설명된 변화로 적고, 판정은 분할 때문에 비정상이다 —
-              배당까지 원인 줄에 섞으면 사람이 무엇을 공시와 맞춰야 하는지 흐려진다
+        목적: 같은 응답에 배당과 분할이 함께 오면 배당은 맞춘 기록(applied)으로 적고, 판정은 분할 때문에 비정상이다 —
+              배당까지 진단 줄에 섞으면 사람이 무엇을 공시와 맞춰야 하는지 흐려진다
 
         Given: 기존 = 기록 없는 10행, 응답 = 2026-01-08 배당 $0.30 · 2026-01-12 2배 분할이 반영된 10행과 두 기록
         When: judge_revision
-        Then: ABNORMAL, 설명된 변화에 01-08 배당, 원인 줄은 분할 하나
+        Then: ABNORMAL, 맞춘 기록에 01-08 배당, 진단 줄은 분할 하나
         """
         # Given
         dividend = {DATES[3]: 0.3}
@@ -401,7 +401,7 @@ class TestRawPrices:
 
     def test_dividend_record_does_not_explain_raw_change(self) -> None:
         """
-        목적: 원본가 판정(explain_dividends=False)은 배당 기록이 있어도 과거 가격의 변화를 설명된 변화로 받지 않는다 —
+        목적: 원본가 판정(explain_dividends=False)은 배당 기록이 있어도 과거 가격의 변화를 배당 반영으로 받지 않는다 —
               받으면 수정주가처럼 바뀐 원본가가 조용히 덮어써진다
 
         Given: 기존 = 원본가 10행, 응답 = 2026-01-12 배당 $0.50 만큼 앞 행이 낮아진 10행과 그 배당 기록
@@ -421,7 +421,7 @@ class TestRawPrices:
 
     def test_unchanged_raw_with_new_rows_is_noise(self) -> None:
         """
-        목적: 원본가는 배당이 있어도 과거가 그대로라 흔들림뿐으로 새 날짜만 붙는다 (덧붙이기)
+        목적: 원본가는 배당이 있어도 과거가 그대로라 노이즈뿐으로 새 날짜만 붙는다 (덧붙이기)
 
         Given: 기존 = 원본가 8행, 응답 = 같은 원본가 10행과 2026-01-12 배당 기록
         When: judge_revision(explain_dividends=False)
@@ -444,11 +444,11 @@ class TestAbnormal:
 
     def test_removed_dividend_is_abnormal_with_implied_amount(self) -> None:
         """
-        목적: 기존에 반영된 배당이 응답에서 빠지면(2026-11-07 TLT 10-01 모양) 비정상 — 원인 줄에 기존이 반영했던 금액을 역산해 적는다
+        목적: 기존에 반영된 배당이 응답에서 빠지면(2026-11-07 TLT 10-01 모양) 비정상 — 진단 줄에 기존이 반영했던 금액을 역산해 적는다
 
         Given: 기존 = 2026-01-12 배당 $0.312 가 반영된 10행, 응답 = 배당 없는 10행 · 기록 없음
         When: judge_revision
-        Then: ABNORMAL, 저장할 표 = 응답, 원인 줄 「2026-01-12 이전 5행 +0.301%」 · 「배당이라면 약 $0.312」 · 「기록 없음」
+        Then: ABNORMAL, 저장할 표 = 응답, 진단 줄 「2026-01-12 이전 5행 +0.301%」 · 「배당이라면 약 $0.312」 · 「기록 없음」
               (0.312 ÷ (104 − 0.312) = 0.301% — 손 계산). 금액은 원인이 배당일 때의 추정으로 적는다 — 빠진 분할 · 정정일 수도 있다
         """
         # Given
@@ -472,7 +472,7 @@ class TestAbnormal:
 
         Given: 기존 = 분할 전 10행, 응답 = 2026-01-12 2배 분할 기록과, 그날 앞 5행이 분할에 더해 +4%
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「분할 2배」
+        Then: ABNORMAL, 진단 줄에 「분할 2배」
         """
         # Given
         split = {DATES[5]: 2.0}
@@ -493,7 +493,7 @@ class TestAbnormal:
         Given: 기존 2행 = 01-07 배당 $0.31 이 반영된 시세(잘라낸 날의 배당), 응답 = 01-07 배당이 빠지고 01-08 ~ 01-16 에
                전날 종가의 1% 씩인 배당 7건이 반영된 10행과 그 7건의 기록
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「기존 끝날 2026-01-06」
+        Then: ABNORMAL, 진단 줄에 「기존 끝날 2026-01-06」
         """
         # Given
         existing = _stored(_adjusted(dividends={DATES[2]: 0.31}), rows=2)
@@ -513,7 +513,7 @@ class TestAbnormal:
 
         Given: 기존 = 2026-01-12 배당 $0.30 반영, 응답 = 같은 날 $0.40 반영과 그 기록
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 응답 기록 금액 $0.400
+        Then: ABNORMAL, 진단 줄에 응답 기록 금액 $0.400
         """
         # Given
         existing = _stored(_adjusted(dividends={DATES[5]: 0.3}))
@@ -532,7 +532,7 @@ class TestAbnormal:
 
         Given: 기존 10행, 응답 = 앞 5행만 × 0.997 · 기록 없음
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「2026-01-12 이전 5행 -0.300%」 · 「기록 없음」
+        Then: ABNORMAL, 진단 줄 「2026-01-12 이전 5행 -0.300%」 · 「기록 없음」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -552,7 +552,7 @@ class TestAbnormal:
 
         Given: 기존 10행, 응답 = 넷째 행의 고가만 +0.5%
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「1행에서」 · 「+0.500%」
+        Then: ABNORMAL, 진단 줄 「1행에서」 · 「+0.500%」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -572,7 +572,7 @@ class TestAbnormal:
 
         Given: 기존 10행, 응답 = 2026-01-08 이 빠진 9행
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「기존 날짜 1개가 응답에 없음 — 2026-01-08」
+        Then: ABNORMAL, 진단 줄 「기존 날짜 1개가 응답에 없음 — 2026-01-08」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -591,7 +591,7 @@ class TestAbnormal:
 
         Given: 기존 = 2026-01-08 이 없는 9행, 응답 10행
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「기존 기간 안에 새 날짜 1개 — 2026-01-08」
+        Then: ABNORMAL, 진단 줄 「기존 기간 안에 새 날짜 1개 — 2026-01-08」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE)).drop(index=3).reset_index(drop=True)
@@ -606,11 +606,11 @@ class TestAbnormal:
 
     def test_new_date_before_existing_first_is_abnormal(self) -> None:
         """
-        목적: 기존 첫날 앞에 날짜가 생겨도 비정상 — 흔들림으로 보면 그 행이 조용히 버려지고, 덮어쓰면 조용히 들어온다
+        목적: 기존 첫날 앞에 날짜가 생겨도 비정상 — 노이즈로 보면 그 행이 조용히 버려지고, 덮어쓰면 조용히 들어온다
 
         Given: 기존 10행(2026-01-05 ~), 응답 = 2026-01-02 한 행 + 같은 10행
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「기존 첫날(2026-01-05) 앞에 날짜 1개가 생김 — 2026-01-02」
+        Then: ABNORMAL, 진단 줄 「기존 첫날(2026-01-05) 앞에 날짜 1개가 생김 — 2026-01-02」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -630,7 +630,7 @@ class TestAbnormal:
 
         Given: 기존 10행, 응답 = 10행 모두 × 1.004 · 기록 없음
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「기존 끝날 2026-01-16 까지 10행 +0.400%」 · 「없음」
+        Then: ABNORMAL, 진단 줄 「기존 끝날 2026-01-16 까지 10행 +0.400%」 · 「없음」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -646,12 +646,12 @@ class TestAbnormal:
 
     def test_small_change_without_record_is_abnormal(self) -> None:
         """
-        목적: 흔들림 상한은 넘었는데 어느 원인 검사에도 걸리지 않고 맞춘 기록도 없으면 비정상 — 설명된 것이 없는데
-              응답으로 덮어쓰면 다른 행의 흔들림까지 들어온다
+        목적: 허용 오차는 넘었는데 어느 원인 검사에도 걸리지 않고 맞춘 기록도 없으면 비정상 — 설명된 것이 없는데
+              응답으로 덮어쓰면 다른 행의 노이즈까지 들어온다
 
         Given: 기존 10행, 응답 = 다섯째 행만 시가 +3e-5 · 종가 +1.5e-5 (열 차 · 계단 · 끝 구간 · 누적 모두 상한 아래) · 기록 없음
         When: judge_revision
-        Then: ABNORMAL, 원인 줄 「기록 없는 작은 변화 — 1행」
+        Then: ABNORMAL, 진단 줄 「기록 없는 작은 변화 — 1행」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -672,7 +672,7 @@ class TestAbnormal:
 
         Given: 기존 10행, 응답 = 첫 행 +9e-5 에서 끝 행 0 까지 하루 1e-5 씩 줄어드는 비율 · 기록 없음
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「쌓임」
+        Then: ABNORMAL, 진단 줄에 「쌓임」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -688,7 +688,7 @@ class TestAbnormal:
 
     def test_issues_largest_first(self) -> None:
         """
-        목적: 원인 줄은 크기가 큰 것부터 — 블록이 앞 몇 줄만 보여도 가장 큰 변화가 보인다
+        목적: 진단 줄은 크기가 큰 것부터 — 블록이 앞 몇 줄만 보여도 가장 큰 변화가 보인다
 
         Given: 기존 = 2026-01-12 배당 $0.312 반영, 응답 = 배당 없음 + 앞 8행 × 0.999 (01-15 에 기록 없는 −0.1%)
         When: judge_revision
@@ -708,11 +708,11 @@ class TestAbnormal:
 
 
 class TestRecordMatch:
-    """계단 · 끝 구간을 기록과 맞추는 기준 — (1 + 계단) ÷ 기록 비율이 흔들림 상한 안"""
+    """계단 · 끝 구간을 기록과 맞추는 기준 — (1 + 계단) ÷ 기록 비율이 허용 오차 안"""
 
     @pytest.mark.parametrize(
         ("extra", "expected_kind"),
-        [(1.9e-5, RevisionKind.EXPLAINED), (2.2e-5, RevisionKind.ABNORMAL)],
+        [(1.9e-5, RevisionKind.DIVIDEND_ADJUSTED), (2.2e-5, RevisionKind.ABNORMAL)],
     )
     def test_record_match_boundary(self, extra: float, expected_kind: RevisionKind) -> None:
         """
@@ -721,7 +721,7 @@ class TestRecordMatch:
 
         Given: 기존 10행, 응답 = 2026-01-12 배당 $0.50 이 반영되고 그날 앞 5행에 extra 만큼 더 바뀐 시세와 그 기록
         When: judge_revision
-        Then: 1.9e-5 → EXPLAINED, 2.2e-5 → ABNORMAL
+        Then: 1.9e-5 → DIVIDEND_ADJUSTED, 2.2e-5 → ABNORMAL
         """
         # Given
         dividends = {DATES[5]: 0.5}
@@ -747,7 +747,7 @@ class TestRecordMatch:
 
         Given: 기존 10행, 응답 = 앞 5행 × 0.5 와 2026-01-12 의 그 기록
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「셀 수 없는 기록」
+        Then: ABNORMAL, 진단 줄에 「셀 수 없는 기록」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE))
@@ -766,7 +766,7 @@ class TestRecordMatch:
 
         Given: 기존 8행, 응답 = 10행 × 0.99 와 2026-01-16 배당 = 전날 종가(비율 0)의 기록
         When: judge_revision
-        Then: ABNORMAL, 원인 줄에 「기존 끝날 2026-01-14」
+        Then: ABNORMAL, 진단 줄에 「기존 끝날 2026-01-14」
         """
         # Given
         existing = _stored(_prices(RAW_CLOSE), rows=8)
@@ -781,7 +781,7 @@ class TestRecordMatch:
 
 
 class TestRecentDividends:
-    """원인 블록에 붙일 응답의 최근 배당"""
+    """진단 출력에 붙일 응답의 최근 배당"""
 
     def test_last_three_dividends_by_date(self) -> None:
         """
@@ -821,11 +821,11 @@ def _abnormal_revision(
 
 
 class TestFormatAbnormalBlock:
-    """사용자가 그대로 AI 에 붙여 넣는 원인 블록"""
+    """사용자가 그대로 AI 에 붙여 넣는 진단 출력"""
 
     def test_block_lines(self) -> None:
         """
-        목적: 블록 머리 · 종목 머리줄 · 사건 5줄 · 「외 N건」 · 최근 배당 · --accept / --exclude 의 뜻을 이 순서로 낸다 —
+        목적: 블록 헤더 · 종목 헤더 줄 · 사건 5줄 · 「외 N건」 · 최근 배당 · --accept / --exclude 의 뜻을 이 순서로 낸다 —
               터미널 y / N 은 없다(결정 Q16). 둘 다 사람이 정한다
 
         Given: 사건 7건 · 최근 배당 3건인 TLT 판정, 실행 2026-11-07 21:10 KST, 기준일 2026-11-06, yfinance 0.2.66

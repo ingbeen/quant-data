@@ -1,4 +1,4 @@
-"""레버리지 합성 검증 ④ — 대조할 실물이 없는 구간에서 가정만 바꾼 판
+"""레버리지 합성 검증 ④ — 대조할 실물이 없는 구간에서 가정만 바꾼 시나리오
 
 ② 합성 ↔ 실물 추적과 ③ 상장 전 펀드 대조는 상장 뒤 시뮬레이션이 필요해 고정 시점 기록으로 굳혔다(결정 Q32).
 정의와 근거는 docs/research/합성_시세_연장.md 5장.
@@ -18,17 +18,17 @@ from quant_data.leveraged.synthetic import build_cost_inputs, month_of, simulate
 # simulate 가 가산금리 0 을 거부 → 사실상 0 으로 둠
 _ZERO_SPREAD: Final = 1e-12
 
-VARIANT_ADOPTED: Final = "채택"
-VARIANT_UNCAPPED: Final = "상한 없음"
-VARIANT_ZERO_SPREAD: Final = "가산금리 0"
-VARIANT_DIVIDEND: Final = "배당 보정"
+SCENARIO_ADOPTED: Final = "채택"
+SCENARIO_UNCAPPED: Final = "상한 없음"
+SCENARIO_ZERO_SPREAD: Final = "가산금리 0"
+SCENARIO_DIVIDEND: Final = "배당 보정"
 
 
 @dataclass(frozen=True)
 class AssumptionResult:
-    """가정 판 하나의 Buy & Hold — 구간 첫날 종가에 사서 끝날 종가까지. 연 수익(달력일 기준) · 최악 낙폭은 %."""
+    """시나리오 하나의 Buy & Hold — 구간 첫날 종가에 사서 끝날 종가까지. 연 수익(달력일 기준) · 최악 낙폭은 %."""
 
-    variant: str
+    scenario: str
     product: str
     leverage: float
     start: date
@@ -67,7 +67,7 @@ def _mdd(closes: pd.Series) -> float:
     return float((closes / closes.cummax() - 1.0).min() * 100.0)
 
 
-def assumption_variants(
+def assumption_scenarios(
     underlying_df: pd.DataFrame,
     ffr_df: pd.DataFrame,
     expense_df: pd.DataFrame,
@@ -77,10 +77,10 @@ def assumption_variants(
     dividend_gap_rate: float | None,
 ) -> list[AssumptionResult]:
     """
-    기초 첫날 ~ end 에서 가정만 바꾼 판의 Buy & Hold 를 상품마다 잰다 (검증 ④). 행은 판 순서 · 상품 순서다.
+    기초 첫날 ~ end 에서 가정만 바꾼 시나리오의 Buy & Hold 를 상품마다 잰다 (검증 ④). 행은 시나리오 순서 · 상품 순서다.
 
-    판: 채택(합성 파일과 같은 비용 입력), 상한 없음, 가산금리 0, 배당 보정(채택 비용에 연 수익을
-    dividend_gap_rate 만큼 복리로 높인 기초 — dividend_gap_rate 가 None 이면 이 판은 없다).
+    시나리오: 채택(합성 파일과 같은 비용 입력), 상한 없음, 가산금리 0, 배당 보정(채택 비용에 연 수익을
+    dividend_gap_rate 만큼 복리로 높인 기초 — dividend_gap_rate 가 None 이면 이 시나리오는 없다).
 
     Args:
         underlying_df: 1배 기초 시세 (합성 파일의 기초)
@@ -96,27 +96,27 @@ def assumption_variants(
     """
     window = underlying_df[underlying_df[COL_DATE] <= end].reset_index(drop=True)
     if len(window) < 2:
-        raise ValueError(f"가정 판의 구간에 날이 2일 이상 필요합니다: {len(window)}일 (끝날 {end})")
+        raise ValueError(f"시나리오 구간에 날이 2일 이상 필요합니다: {len(window)}일 (끝날 {end})")
     start = window[COL_DATE].iloc[0]
     last = window[COL_DATE].iloc[-1]
 
     first_month = month_of(start)
     adopted = build_cost_inputs(ffr_df, expense_df, first_month)
-    variants = [
-        (VARIANT_ADOPTED, window, adopted),
-        (VARIANT_UNCAPPED, window, build_cost_inputs(ffr_df, expense_df, first_month, spread_cap=None)),
-        (VARIANT_ZERO_SPREAD, window, replace(adopted, spread={month: _ZERO_SPREAD for month in adopted.spread})),
+    scenarios = [
+        (SCENARIO_ADOPTED, window, adopted),
+        (SCENARIO_UNCAPPED, window, build_cost_inputs(ffr_df, expense_df, first_month, spread_cap=None)),
+        (SCENARIO_ZERO_SPREAD, window, replace(adopted, spread={month: _ZERO_SPREAD for month in adopted.spread})),
     ]
     if dividend_gap_rate is not None:
-        variants.append((VARIANT_DIVIDEND, _with_annual_drift(window, dividend_gap_rate), adopted))
+        scenarios.append((SCENARIO_DIVIDEND, _with_annual_drift(window, dividend_gap_rate), adopted))
 
     results: list[AssumptionResult] = []
-    for variant, underlying, costs in variants:
+    for scenario, underlying, costs in scenarios:
         for product, leverage in products:
             closes = simulate_leveraged(underlying, leverage, costs)[COL_CLOSE]
             results.append(
                 AssumptionResult(
-                    variant=variant,
+                    scenario=scenario,
                     product=product,
                     leverage=leverage,
                     start=start,

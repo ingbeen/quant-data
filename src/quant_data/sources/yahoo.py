@@ -1,6 +1,6 @@
 """야후 받기 — 한 응답에서 원본가 · 수정주가(C-1) · 배당 · 분할 기록, 받을 마지막 날
 
-`auto_adjust=False` 로 받아 수정 가격을 yfinance 와 같은 식으로 직접 만든다 — 배당 · 분할 기록과 원시 종가를 같은
+`auto_adjust=False` 로 받아 수정 가격을 yfinance 와 같은 식으로 직접 만든다 — 배당 · 분할 기록과 원본 종가를 같은
 응답에서 얻어야 다시 받은 시세의 변화를 기록과 맞춰 볼 수 있다. 결과를 좌우하는 인자는 기본값에 맡기지 않는다:
 auto_adjust 의 기본값은 True 라 빠뜨리면 수정주가가 원본가 자리에 조용히 들어가고, raise_errors 가 어긋나면
 조회 실패가 빈 결과로 돌아온다. 파일은 쓰지 않는다 — 판정 · 쓰기는 update 가 한다.
@@ -35,7 +35,7 @@ NEW_YORK_DAY_END: Final = time(18, 0)
 
 @dataclass(frozen=True)
 class YahooResponse:
-    """한 번의 응답 — 기준일로 자르기 전 전체. raw 는 원시 가격, adjusted 는 C-1, 둘 다 REQUIRED_COLUMNS."""
+    """한 번의 응답 — 기준일로 자르기 전 전체. raw 는 원본가, adjusted 는 C-1, 둘 다 REQUIRED_COLUMNS."""
 
     raw: pd.DataFrame
     adjusted: pd.DataFrame
@@ -83,10 +83,10 @@ def _new_york_zone() -> ZoneInfo:
 
 def adjust_prices(raw: pd.DataFrame) -> pd.DataFrame:
     """
-    yfinance auto_adjust 와 같은 수정 가격(C-1) — 시가 · 고가 · 저가 × (수정 종가 ÷ 원시 종가), 종가 = 수정 종가, 거래량 그대로.
+    yfinance auto_adjust 와 같은 수정 가격(C-1) — 시가 · 고가 · 저가 × (수정 종가 ÷ 원본 종가), 종가 = 수정 종가, 거래량 그대로.
 
     Args:
-        raw: history(auto_adjust=False) 를 날짜 열로 편 표 (COL_DATE · 원시 가격 · COL_ADJ_CLOSE · COL_VOLUME)
+        raw: history(auto_adjust=False) 를 날짜 열로 편 표 (COL_DATE · 원본가 · COL_ADJ_CLOSE · COL_VOLUME)
 
     Returns:
         REQUIRED_COLUMNS 표
@@ -107,7 +107,7 @@ def adjust_prices(raw: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_yahoo(ticker: str) -> YahooResponse:
     """
-    전체 기간의 원시 시세 · 수정 종가 · 배당 · 분할을 한 번에 받는다. 기준일로 자르지 않는다 — 기존 끝날을 아는
+    전체 기간의 원본 시세 · 수정 종가 · 배당 · 분할을 한 번에 받는다. 기준일로 자르지 않는다 — 기존 끝날을 아는
     update 가 자른다.
 
     Raises:

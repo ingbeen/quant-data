@@ -308,7 +308,7 @@ class TestSpliceProxy:
 
     def test_pure_rescaled_pre_seam_equals_spliced_pre_seam(self) -> None:
         """
-        목적: 순수판(전 구간 스케일)의 이음매 앞 가격이 이어 붙인 판의 이음매 앞 가격과 같다
+        목적: 전 구간 스케일 시계열의 이음매 앞 가격이 이어 붙인 시계열의 이음매 앞 가격과 같다
 
         Given: 같은 대용 · 실물
         When: rescale_to_actual 과 splice_proxy

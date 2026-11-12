@@ -1,7 +1,7 @@
 """Coin Metrics 커뮤니티 API 일별 지표 받기 — verify-lab `coinmetrics_collector` 에서 옮김
 
-인증키 없이 비트코인 일별 지표(기준가 · MVRV · 시가총액)를 첫 날(2010-07-18)부터 받는다. 기준가는 Bitstamp 일봉의 두 출처
-대조 상대다. 파일은 쓰지 않는다 — 판정 · 쓰기는 update 가 한다.
+인증키 없이 비트코인 일별 지표(기준가 · MVRV · 시가총액)를 첫 날(2010-07-18)부터 받는다. 기준가는 Bitstamp 일봉의 교차 확인
+상대다. 파일은 쓰지 않는다 — 판정 · 쓰기는 update 가 한다.
 
 실측한 함정 둘 (verify-lab 2026-09-29)
 1. paging_from 을 주지 않으면 최신 행부터 와 한 페이지만 받으면 예외 없이 최근 구간만 남는다 → paging_from=start

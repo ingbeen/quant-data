@@ -1,9 +1,9 @@
-"""자료별 갱신 방식 표 — 자료마다 받는 방식 · 갱신 방식 · 저장 파일 · 새로 붙는 날 검사를 한 곳에서 정한다
+"""자료별 갱신 방식 표 — 자료마다 받는 방식 · 갱신 방식 · 저장 파일 · 신규 일자 검사를 한 곳에서 정한다
 
-갱신 방식은 셋이다. 다시 받음(한 응답에서 수정주가는 다시 계산 · 원본가는 덧붙이기), 덧붙이기, 고정(첫 판 뒤 받지 않음).
-쓰는 곳이 없으면 고정이 기본이다(결정 Q20) — 받으면 판정에 걸려 멈출 일만 는다. 짝 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
-다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인은 새로 나온 날을 받아 붙인다(Q36 · docs/research/시세_받기_판정.md 2장 표). 고정 자료는 판 요약에 오른 적이
-없을 때만 한 번 받는다(첫 판). 가공(합성 · 국내 수정주가)은 표에 없다 — 갱신 때마다 다시 만든다.
+갱신 방식은 셋이다. 다시 받음(한 응답에서 수정주가는 다시 계산 · 원본가는 덧붙이기), 덧붙이기, 고정(최초 수집 뒤 받지 않음).
+쓰는 곳이 없으면 고정이 기본이다(결정 Q20) — 받으면 판정에 걸려 멈출 일만 는다. 벤치마크 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
+다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인은 새로 나온 날을 받아 붙인다(Q36 · docs/research/시세_받기_판정.md 2장 표). 고정 자료는 매니페스트에 오른 적이
+없을 때만 한 번 받는다(최초 수집). 가공(합성 · 국내 수정주가)은 표에 없다 — 갱신 때마다 다시 만든다.
 """
 
 from dataclasses import dataclass
@@ -45,17 +45,18 @@ class Kind(Enum):
 
 @dataclass(frozen=True)
 class Dataset:
-    """자료 하나 — 이름은 --exclude · --accept · 패스 목록이 자료를 가리키는 이름이다.
+    """자료 하나 — 이름은 --exclude · --accept · 허용 목록이 자료를 가리키는 이름이다.
 
-    files 는 저장소 루트 기준 경로다. pair · leverage 는 새로 붙는 날의 짝 대조, source 는 받기 함수에 넘길 식별자(비면
-    이름 — 야후 티커 · KRX 코드 · Coin Metrics 지표), decimals 는 하루 한 값 계열 파일의 저장 자릿수다.
+    files 는 저장소 루트 기준 경로다. reference 는 신규 일자 검사의 비교 대상(미국은 벤치마크 — leverage 배율로
+    추적 차이를 잰다, 비트코인은 교차 확인 상대), source 는 받기 함수에 넘길 식별자(비면
+    이름 — 야후 티커 · KRX 코드 · Coin Metrics 지표), decimals 는 일별 시계열 파일의 저장 자릿수다.
     """
 
     name: str
     kind: Kind
     method: Method
     files: tuple[Path, ...]
-    pair: str | None = None
+    reference: str | None = None
     leverage: float = 1.0
     source: str | None = None
     decimals: int = ROUND_INPUT_PRICE
@@ -75,7 +76,7 @@ def _fund(
     method: Method,
     *,
     bases: tuple[PriceBasis, ...] = (PriceBasis.RAW, PriceBasis.ADJUSTED),
-    pair: str | None = None,
+    reference: str | None = None,
     leverage: float = 1.0,
 ) -> Dataset:
     return Dataset(
@@ -83,7 +84,7 @@ def _fund(
         kind=Kind.YAHOO_FUND,
         method=method,
         files=tuple(price_path(name, basis) for basis in bases),
-        pair=pair,
+        reference=reference,
         leverage=leverage,
     )
 
@@ -122,27 +123,27 @@ def _coin_metric(metric: str, decimals: int) -> Dataset:
     )
 
 
-# 고정 펀드 · 금 선물은 quant 첫 판(수정주가 하나)을 그대로 쓴다
+# 고정 펀드 · 금 선물은 quant 첫 버전(수정주가 하나)을 그대로 쓴다
 _ADJUSTED_ONLY = (PriceBasis.ADJUSTED,)
 
 CATALOG: tuple[Dataset, ...] = (
-    # quant 몫 실물 — 다시 받음, 짝 대조(Q29 · Q30 · Q31)
-    _fund("SPY", Method.REFETCH, pair="^GSPC", leverage=1.0),
-    _fund("QQQ", Method.REFETCH, pair="^NDX", leverage=1.0),
-    _fund("GLD", Method.REFETCH, pair="IAU", leverage=1.0),
-    _fund("TLT", Method.REFETCH, pair="SPTL", leverage=1.0),
-    _fund("TQQQ", Method.REFETCH, pair="^NDX", leverage=3.0),
-    _fund("SSO", Method.REFETCH, pair="^GSPC", leverage=2.0),
-    _fund("QLD", Method.REFETCH, pair="^NDX", leverage=2.0),
-    _fund("UPRO", Method.REFETCH, pair="^GSPC", leverage=3.0),
-    # 짝 — 지수는 덧붙이기, 같은 자산의 다른 ETF 는 수정주가 수익률로 견주려고 다시 받음(Q31)
+    # quant 용 실물 — 다시 받음, 벤치마크 대조(Q29 · Q30 · Q31)
+    _fund("SPY", Method.REFETCH, reference="^GSPC", leverage=1.0),
+    _fund("QQQ", Method.REFETCH, reference="^NDX", leverage=1.0),
+    _fund("GLD", Method.REFETCH, reference="IAU", leverage=1.0),
+    _fund("TLT", Method.REFETCH, reference="SPTL", leverage=1.0),
+    _fund("TQQQ", Method.REFETCH, reference="^NDX", leverage=3.0),
+    _fund("SSO", Method.REFETCH, reference="^GSPC", leverage=2.0),
+    _fund("QLD", Method.REFETCH, reference="^NDX", leverage=2.0),
+    _fund("UPRO", Method.REFETCH, reference="^GSPC", leverage=3.0),
+    # 벤치마크 — 지수는 덧붙이기, 같은 자산의 다른 ETF 는 수정주가 수익률로 견주려고 다시 받음(Q31)
     _index("^NDX"),
     _index("^GSPC"),
     _fund("IAU", Method.REFETCH),
     _fund("SPTL", Method.REFETCH),
     Dataset(name="FFR", kind=Kind.FRED_MONTHLY, method=Method.APPEND, files=(FFR_DATA_PATH,)),
-    # verify-lab 몫 미국 — 중간선거 · 역방향 조사의 대상과 그 짝
-    _fund("DIA", Method.REFETCH, pair="^DJI", leverage=1.0),
+    # verify-lab 용 미국 — 중간선거 · 역방향 조사의 대상과 그 벤치마크
+    _fund("DIA", Method.REFETCH, reference="^DJI", leverage=1.0),
     _index("^DJI"),
     _index("^IXIC"),
     # 합성 재료 · 검증용 펀드 — 고정
@@ -168,13 +169,13 @@ CATALOG: tuple[Dataset, ...] = (
     *(_kr_index(code) for code in ("1001", "1028", "2001", "2203")),
     _kr_nav("261240"),
     _kr_nav("261250"),
-    # 비트코인 — 덧붙이기, Bitstamp 일봉 ↔ Coin Metrics 기준가 두 출처 대조(사용자 결정 2026-11-11)
+    # 비트코인 — 덧붙이기, Bitstamp 일봉 ↔ Coin Metrics 기준가 교차 확인(사용자 결정 2026-11-11)
     Dataset(
         name="BTCUSD",
         kind=Kind.BITSTAMP,
         method=Method.APPEND,
         files=(price_path("BTCUSD", PriceBasis.RAW),),
-        pair="BTC_PriceUSD",
+        reference="BTC_PriceUSD",
     ),
     _coin_metric("PriceUSD", ROUND_INPUT_PRICE),
     _coin_metric("CapMVRVCur", 4),  # 배수 — 비율과 같은 4자리

@@ -8,7 +8,7 @@ sources.coinmetrics 모듈 테스트 — Coin Metrics 커뮤니티 API 일별 �
 4. UTC 로 끝나지 않은 날을 빼고, 첫 날 · 끝(하루 공개 지연 허용) · 사이의 빈틈을 보는가? (「지금」은 인자로)
 
 왜 중요한가요?
-Coin Metrics 기준가는 Bitstamp 일봉의 두 출처 대조 상대다 — 하루 밀리거나 잘리면 대조가 에러 없이 틀린다.
+Coin Metrics 기준가는 Bitstamp 일봉의 교차 확인 상대다 — 하루 밀리거나 잘리면 대조가 에러 없이 틀린다.
 """
 
 import json
@@ -136,7 +136,7 @@ class TestParse:
 
     def test_rows_are_parsed_into_series_schema(self) -> None:
         """
-        목적: 행을 하루 한 값 계열(날짜 · 값)로 바꾼다 — 날짜는 그 값의 UTC 날짜
+        목적: 행을 일별 시계열(날짜 · 값)로 바꾼다 — 날짜는 그 값의 UTC 날짜
 
         Given: 2010-07-18 한 행
         When: parse_metric_rows

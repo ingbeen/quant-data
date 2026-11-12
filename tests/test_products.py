@@ -8,7 +8,7 @@ products 모듈 테스트 — 가공(합성 · 검증 표) 대상 표의 연결
 
 왜 중요한가요?
 대용 · 실물 · 저장 경로가 어긋나면 다른 상품의 시세로 이은 합성이 에러 없이 저장된다. 계산 자체는 옮긴 함수들의
-테스트와, 첫 판에서 quant 합성과 값이 같은지의 대조가 지킨다.
+테스트와, 첫 버전에서 quant 합성과 값이 같은지의 대조가 지킨다.
 """
 
 from datetime import date
@@ -31,7 +31,7 @@ from quant_data.constants import (
 )
 from quant_data.leveraged.constants import LEVERAGED_SYNTHETIC_TARGETS
 from quant_data.prices import PriceBasis, price_path, save_prices
-from quant_data.products import ASSUMPTION_TARGETS, PROXY_TARGETS, build_kr_products
+from quant_data.products import ASSUMPTION_TARGETS, DISPLAY_SCENARIO, PROXY_TARGETS, build_kr_products
 from quant_data.series import save_series
 
 
@@ -75,6 +75,21 @@ class TestAssumptionTargets:
 
         # Then
         assert leveraged_bases <= assumption_bases
+
+    def test_scenario_column_label(self) -> None:
+        """
+        목적: 검증 ④ 표(assumptions.csv)의 첫 열 이름은 「시나리오」다 — 이 표는 직전 커밋 값과 git diff 로 견주므로
+              (합성 연구 결정 9) 열 이름이 에러 없이 바뀌면 그 diff 에 섞여 들어간다
+
+        Given: 검증 ④ 표의 첫 열 이름 상수
+        When: 글자를 본다
+        Then: 「시나리오」
+        """
+        # When
+        label = DISPLAY_SCENARIO
+
+        # Then
+        assert label == "시나리오"
 
 
 class TestKrProducts:

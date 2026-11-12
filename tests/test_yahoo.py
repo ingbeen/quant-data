@@ -2,7 +2,7 @@
 sources.yahoo 모듈 테스트 — 야후 받기 · 수정 가격(C-1) · 받을 마지막 날
 
 이 파일은 무엇을 검증하나요?
-1. 전체 기간을 원시 가격으로 받고(auto_adjust=False), 조회 실패가 빈 결과가 아니라 예외로 오는가(raise_errors=True)?
+1. 전체 기간을 원본가로 받고(auto_adjust=False), 조회 실패가 빈 결과가 아니라 예외로 오는가(raise_errors=True)?
 2. 한 응답에서 원본가 · 수정주가 · 배당 · 분할 기록을 함께 돌려주고 파일은 쓰지 않는가? (결정 Q17)
 3. 응답에 기록 열이 없거나 비었으면 멈추는가?
 4. 받을 마지막 날이 기본(그저께) · --end(뉴욕에서 그날 봉이 끝나기 전인 날은 뺀다)대로 정해지는가?
@@ -10,7 +10,7 @@ sources.yahoo 모듈 테스트 — 야후 받기 · 수정 가격(C-1) · 받을
 
 왜 중요한가요?
 auto_adjust 의 라이브러리 기본값은 True 라 인자를 빠뜨리면 수정주가가 원본가 자리에 조용히 저장된다.
-배당 · 분할 기록과 원시 종가가 같은 응답에서 와야 다시 받은 시세의 변화를 기록과 맞춰 볼 수 있다.
+배당 · 분할 기록과 원본 종가가 같은 응답에서 와야 다시 받은 시세의 변화를 기록과 맞춰 볼 수 있다.
 """
 
 from datetime import UTC, date, datetime
@@ -41,7 +41,7 @@ def _history(
     dividends: list[float] | None = None,
     splits: list[float] | None = None,
 ) -> pd.DataFrame:
-    """history(auto_adjust=False) 모양 — 날짜가 인덱스, 원시 가격 · 수정 종가 · 배당 · 분할 열."""
+    """history(auto_adjust=False) 모양 — 날짜가 인덱스, 원본가 · 수정 종가 · 배당 · 분할 열."""
     closes = [103.0, 104.0, 105.0]
     df = pd.DataFrame(
         {
@@ -72,7 +72,7 @@ class TestFetchYahoo:
 
     def test_requests_full_period_raw_with_errors_raised(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        목적: 결과를 좌우하는 인자를 기본값에 맡기지 않는다 — 전체 기간 · 원시 가격 · 실패는 예외
+        목적: 결과를 좌우하는 인자를 기본값에 맡기지 않는다 — 전체 기간 · 원본가 · 실패는 예외
 
         Given: 대역 응답
         When: fetch_yahoo("TEST")
@@ -89,12 +89,12 @@ class TestFetchYahoo:
 
     def test_raw_and_adjusted_from_one_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        목적: 원본가는 응답의 원시 가격 그대로, 수정주가는 같은 응답의 C-1 이다 — 둘이 다른 응답에서 오면
+        목적: 원본가는 응답의 원본가 그대로, 수정주가는 같은 응답의 C-1 이다 — 둘이 다른 응답에서 오면
               배당 기록과 수정 비율이 어긋날 수 있다
 
-        Given: 원시 종가 103 · 104 · 105, 수정 종가 101 · 102 · 105
+        Given: 원본 종가 103 · 104 · 105, 수정 종가 101 · 102 · 105
         When: fetch_yahoo
-        Then: raw = 원시 가격(REQUIRED_COLUMNS, 날짜는 date), adjusted = adjust_prices(응답), 둘 다 3행
+        Then: raw = 원본가(REQUIRED_COLUMNS, 날짜는 date), adjusted = adjust_prices(응답), 둘 다 3행
         """
         # Given
         history = _history(adj_close=[101.0, 102.0, 105.0])
@@ -114,11 +114,11 @@ class TestFetchYahoo:
 
     def test_events_hold_only_days_with_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        목적: 배당 · 분할 기록은 값이 있는 날만, 원시 종가는 응답 전체 — 판정이 기록 날짜로 계단을 맞춘다
+        목적: 배당 · 분할 기록은 값이 있는 날만, 원본 종가는 응답 전체 — 판정이 기록 날짜로 계단을 맞춘다
 
         Given: 2023-01-03 배당 $0.50, 2023-01-04 2배 분할
         When: fetch_yahoo
-        Then: dividends = {01-03: 0.5}, splits = {01-04: 2.0}, raw_close = 세 날의 원시 종가
+        Then: dividends = {01-03: 0.5}, splits = {01-04: 2.0}, raw_close = 세 날의 원본 종가
         """
         # Given
         _mock_ticker(monkeypatch, _history(dividends=[0.0, 0.5, 0.0], splits=[0.0, 0.0, 2.0]))
@@ -289,9 +289,9 @@ class TestAdjustPrices:
 
     def test_scales_open_high_low_by_adj_close_ratio(self) -> None:
         """
-        목적: 시가 · 고가 · 저가 × (수정 종가 ÷ 원시 종가), 종가 = 수정 종가, 거래량 그대로 — auto_adjust=True 로 받던 값과 같다
+        목적: 시가 · 고가 · 저가 × (수정 종가 ÷ 원본 종가), 종가 = 수정 종가, 거래량 그대로 — auto_adjust=True 로 받던 값과 같다
 
-        Given: 원시 시가 101 · 고가 102 · 저가 99 · 종가 100, 수정 종가 98, 거래량 5000
+        Given: 원본 시가 101 · 고가 102 · 저가 99 · 종가 100, 수정 종가 98, 거래량 5000
         When: adjust_prices
         Then: 열 = REQUIRED_COLUMNS, 시가 98.98 · 고가 99.96 · 저가 97.02 · 종가 98.0 · 거래량 5000 (손 계산)
         """

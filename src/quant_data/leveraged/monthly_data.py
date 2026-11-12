@@ -324,12 +324,12 @@ def parse_fred_ffr_csv(csv_text: str) -> pd.DataFrame:
         월별 DataFrame (DATE: str (yyyy-mm), VALUE: float (0~1 비율))
 
     Raises:
-        ValueError: 머리가 다를 때, 값이 하나도 없을 때, 날짜가 그달 1일이 아닐 때, 달이 빠짐없이 이어지지 않을 때,
+        ValueError: 헤더가 다를 때, 값이 하나도 없을 때, 날짜가 그달 1일이 아닐 때, 달이 빠짐없이 이어지지 않을 때,
             값이 비었거나 숫자가 아닐 때(FRED 의 결측 표기 「.」 포함) — 메우지 않는다
     """
     raw = pd.read_csv(io.StringIO(csv_text), dtype=str, keep_default_na=False)
     if tuple(raw.columns) != _FRED_COLUMNS:
-        raise ValueError(f"FRED 금리 CSV 의 머리가 {list(_FRED_COLUMNS)} 가 아닙니다: {list(raw.columns)} — FRED 형식이 바뀌었는지 확인하세요")
+        raise ValueError(f"FRED 금리 CSV 의 헤더가 {list(_FRED_COLUMNS)} 가 아닙니다: {list(raw.columns)} — FRED 형식이 바뀌었는지 확인하세요")
     if raw.empty:
         raise ValueError("FRED 금리 CSV 에 값이 비어 있습니다")
 
@@ -379,7 +379,7 @@ def fetch_ffr_monthly() -> pd.DataFrame:
 
 
 def save_monthly_data(df: pd.DataFrame, path: Path) -> None:
-    """월별 데이터를 기존 금리 파일과 같은 글자(머리 DATE,VALUE · 줄 끝 CRLF)로 쓴다. 상위 폴더가 없으면 만든다."""
+    """월별 데이터를 기존 금리 파일과 같은 글자(헤더 DATE,VALUE · 줄 끝 CRLF)로 쓴다. 상위 폴더가 없으면 만든다."""
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False, lineterminator=_MONTHLY_CSV_LINE_END)
     logger.debug(f"월별 데이터 저장: {path} ({len(df)}개월)")

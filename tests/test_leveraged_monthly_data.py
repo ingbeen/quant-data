@@ -493,7 +493,7 @@ class TestParseFredFfrCsv:
 
     def test_rejects_unexpected_header(self):
         """
-        목적: 머리가 다르면 멈춘다 — FRED 는 날짜 열 이름을 바꾼 적이 있다(DATE → observation_date)
+        목적: 헤더가 다르면 멈춘다 — FRED 는 날짜 열 이름을 바꾼 적이 있다(DATE → observation_date)
 
         Given: 날짜 열 이름이 DATE 인 CSV
         When: parse_fred_ffr_csv
@@ -503,7 +503,7 @@ class TestParseFredFfrCsv:
         text = "DATE,FEDFUNDS\n1999-01-01,4.63\n"
 
         # When & Then
-        with pytest.raises(ValueError, match="머리"):
+        with pytest.raises(ValueError, match="헤더"):
             parse_fred_ffr_csv(text)
 
     @pytest.mark.parametrize("value", [".", ""])
@@ -556,7 +556,7 @@ class TestParseFredFfrCsv:
         """
         목적: 값이 하나도 없으면 멈춘다 (경계)
 
-        Given: 머리뿐인 CSV
+        Given: 헤더뿐인 CSV
         When: parse_fred_ffr_csv
         Then: ValueError
         """
@@ -708,11 +708,11 @@ class TestJudgeMonthlyAppend:
 
     def test_changed_past_value_is_abnormal(self):
         """
-        목적: 지난 달 값이 바뀌면 비정상 — 「데이터가 바뀌면 오류」(판정 원칙). 원인 줄에 그 달과 두 값을 적는다
+        목적: 지난 달 값이 바뀌면 비정상 — 「데이터가 바뀌면 오류」(판정 원칙). 진단 줄에 그 달과 두 값을 적는다
 
         Given: 기존 1999-01 = 0.0463, 응답 1999-01 = 0.0470
         When: judge_monthly_append
-        Then: ABNORMAL, 원인 줄에 「1999-01」 · 「0.0463」 · 「0.047」
+        Then: ABNORMAL, 진단 줄에 「1999-01」 · 「0.0463」 · 「0.047」
         """
         # Given
         existing = _monthly(["1999-01", "1999-02"], [0.0463, 0.0476])
@@ -731,7 +731,7 @@ class TestJudgeMonthlyAppend:
 
         Given: 기존 1999-01 ~ 1999-03, 1999-02 부터만 주는 응답
         When: judge_monthly_append
-        Then: ABNORMAL, 원인 줄에 「1999-01」 · 「응답에 없음」
+        Then: ABNORMAL, 진단 줄에 「1999-01」 · 「응답에 없음」
         """
         # Given
         existing = _monthly(["1999-01", "1999-02", "1999-03"], [0.0463, 0.0476, 0.0481])

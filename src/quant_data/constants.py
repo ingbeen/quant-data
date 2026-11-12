@@ -8,15 +8,15 @@ from typing import Final
 # ============================================================
 # 실행 위치가 아니라 이 파일 기준 — 사용처 저장소의 세션에서 절대 경로로 불러도 그 저장소에 쓰지 않게
 REPO_ROOT: Final = Path(__file__).resolve().parents[2]
-# 판 요약 · 내보내기가 이 상대 경로를 파일 이름처럼 적는다 — 절대 경로면 공개 저장소에 로컬 경로가 올라간다
+# 매니페스트 · 내보내기가 이 상대 경로를 파일 이름처럼 적는다 — 절대 경로면 공개 저장소에 로컬 경로가 올라간다
 STORAGE_DIR: Final = Path("storage")
 PRICES_DIR: Final = STORAGE_DIR / "prices"  # 시세 — 이름은 prices.price_path
 SERIES_DIR: Final = STORAGE_DIR / "series"  # 하루 · 한 달에 값 하나인 계열 (금리 · 운용비율 · 금값 · 환율)
 RECORDS_DIR: Final = STORAGE_DIR / "records"  # 사람 · AI 가 쓰는 기록
 VALIDATION_DIR: Final = STORAGE_DIR / "validation"  # 합성 검증 표
-EDITION_PATH: Final = STORAGE_DIR / "edition.json"  # 판 요약
+MANIFEST_PATH: Final = STORAGE_DIR / "manifest.json"
 
-PASS_LIST_PATH: Final = RECORDS_DIR / "pass_list.csv"  # 새로 붙는 날 검사의 예외 — 사람과 AI 가 적는다
+ALLOWLIST_PATH: Final = RECORDS_DIR / "allowlist.csv"  # 신규 일자 검사의 예외 — 사람과 AI 가 적는다
 
 FFR_DATA_PATH: Final = SERIES_DIR / "federal_funds_rate_monthly.csv"  # FRED 월별 연방기금금리
 EXPENSE_RATIO_DATA_PATH: Final = SERIES_DIR / "tqqq_net_expense_ratio_monthly.csv"  # TQQQ 순운용비율 (손 갱신)
@@ -40,10 +40,10 @@ COL_BASE_PRICE: Final = "BasePrice"
 COL_CHANGE_RATE: Final = "ChangeRate"
 COL_LISTED_SHARES: Final = "ListedShares"
 
-# 하루 한 값인 계열(지수 종가 · NAV · Coin Metrics · 분배 기록)의 값 열 — 단위는 계열마다 달라 이름이 중립이다
+# 일별 시계열(지수 종가 · NAV · Coin Metrics · 분배 기록)의 값 열 — 단위는 계열마다 달라 이름이 중립이다
 COL_VALUE: Final = "Value"
 
-# FRED fredgraph.csv 의 날짜 열 — 이름을 바꾼 적이 있음(DATE → observation_date) → 받을 때 머리까지 고정
+# FRED fredgraph.csv 의 날짜 열 — 이름을 바꾼 적이 있음(DATE → observation_date) → 받을 때 헤더까지 고정
 FRED_DATE_COLUMN: Final = "observation_date"
 
 # ============================================================

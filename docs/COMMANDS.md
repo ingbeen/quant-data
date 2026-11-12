@@ -8,7 +8,7 @@
 
 ## 갱신
 
-받기 → 판정 → 가공(합성 · 검증 표) → 쓰기 → 판 요약(`storage/edition.json`). 비정상이나 새로 붙는 날 실패가 하나라도
+받기 → 판정 → 가공(합성 · 검증 표) → 쓰기 → 매니페스트(`storage/manifest.json`). 비정상이나 신규 일자 실패가 하나라도
 있으면 원인을 내고 **아무 파일도 쓰지 않은 채** 종료 코드 1 로 끝난다.
 
 ```bash
@@ -20,16 +20,16 @@ poetry run python scripts/update.py --end 2026-11-06
 poetry run python scripts/update.py --exclude QQQ
 poetry run python scripts/update.py --accept QQQ
 
-# 받지 않고 지금 파일로 가공 · 판 요약만 — 가공 코드를 고친 뒤. 기준일은 판 요약의 것
+# 받지 않고 지금 파일로 가공 · 매니페스트만 — 가공 코드를 고친 뒤. 기준일은 매니페스트의 것
 poetry run python scripts/update.py --no-fetch
 ```
 
-새로 붙는 날 검사에 걸린 날은 `storage/records/pass_list.csv` 에 `종목,날짜,검사,사유,근거` 한 줄을 적고 다시 실행한다.
+신규 일자 검사에 걸린 날은 `storage/records/allowlist.csv` 에 `종목,날짜,검사,사유,근거` 한 줄을 적고 다시 실행한다.
 
-판 요약에 오른 적 없는 고정 자료가 있으면 그 갱신이 한 번 받는다 — 국내(KRX) 자료가 들면 `.env` 의 KRX 계정이 필요하고
-오래 걸린다(첫 판의 기록은 `docs/research/시세_받기_판정.md` 6.9). 그때 `--no-fetch` 는 멈춘다.
+매니페스트에 오른 적 없는 고정 자료가 있으면 그 갱신이 한 번 받는다 — 국내(KRX) 자료가 들면 `.env` 의 KRX 계정이 필요하고
+오래 걸린다(최초 수집의 기록은 `docs/research/시세_받기_판정.md` 6.9). 그때 `--no-fetch` 는 멈춘다.
 
-판 요약(`storage/edition.json`)과 데이터 파일이 어긋나면(판 요약 없음 · 빠진 파일 · 목록 밖 파일 · 첫날 · 끝날 · 행 수) 받든 안 받든 받기 전에 멈춘다 — 둘을 같은 커밋에서 함께 git 이력에서 되살린다.
+매니페스트(`storage/manifest.json`)와 데이터 파일이 어긋나면(매니페스트 없음 · 빠진 파일 · 목록 밖 파일 · 첫날 · 끝날 · 행 수) 받든 안 받든 받기 전에 멈춘다 — 둘을 같은 커밋에서 함께 git 이력에서 되살린다.
 
 ## 내보내기
 

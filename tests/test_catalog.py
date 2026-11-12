@@ -2,14 +2,14 @@
 catalog 모듈 테스트 — 자료별 갱신 방식 표
 
 이 파일은 무엇을 검증하나요?
-1. 자료마다 갱신 방식(다시 받음 · 덧붙이기 · 고정)이 docs/research/시세_받기_판정.md 2장의 표와 같은가? (결정 Q20 · Q36, verify-lab 몫 Q9)
-2. 새로 붙는 날 검사의 짝 · 배율이 결정대로인가? (결정 Q29 · Q30 · Q31) 짝은 표 안의, 고정이 아닌 자료인가?
+1. 자료마다 갱신 방식(다시 받음 · 덧붙이기 · 고정)이 docs/research/시세_받기_판정.md 2장의 표와 같은가? (결정 Q20 · Q36, verify-lab 용은 Q9)
+2. 신규 일자 검사의 비교 대상 · 배율이 결정대로인가? (결정 Q29 · Q30 · Q31) 비교 대상은 표 안의, 고정이 아닌 자료인가?
 3. 자료마다 저장 파일이 가격 기준을 이름에 담은 경로인가? (결정 Q10 · Q33) 국내 ETF 는 원본가와 야후 분배 기록인가?
-4. 표 안의 연결(짝 · 레버리지 합성의 실물)이 표 안의 자료를 가리키는가?
+4. 표 안의 연결(비교 대상 · 레버리지 합성의 실물)이 표 안의 자료를 가리키는가?
 
 왜 중요한가요?
 갱신 방식은 이 표 한 곳에서 정한다. 고정 자료가 다시 받음으로 바뀌면 쓰는 곳 없는 자료가 갱신마다 판정에 걸려 멈추고,
-짝 · 배율이 틀리면 정상인 날이 멈추거나 오류인 날이 통과한다 — 둘 다 에러 없이 일어난다.
+비교 대상 · 배율이 틀리면 정상인 날이 멈추거나 오류인 날이 통과한다 — 둘 다 에러 없이 일어난다.
 """
 
 from pathlib import Path
@@ -33,7 +33,7 @@ class TestMethods:
 
     def test_method_by_name(self) -> None:
         """
-        목적: 자료마다 갱신 방식을 고정한다 — 쓰는 곳이 없으면 고정이 기본(Q20), 짝 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
+        목적: 자료마다 갱신 방식을 고정한다 — 쓰는 곳이 없으면 고정이 기본(Q20), 벤치마크 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
               다시 받음(Q29 · Q31), 월별 금리 · 비트코인은 새 날을 받아 붙인다(Q36 · 시세_받기_판정.md 2장 표)
 
         Given: 자료별 갱신 방식 표
@@ -71,7 +71,7 @@ class TestMethods:
 
     def test_names_are_unique(self) -> None:
         """
-        목적: 자료 이름은 하나뿐이다 — --exclude · --accept · 패스 목록이 이름으로 자료를 가리킨다
+        목적: 자료 이름은 하나뿐이다 — --exclude · --accept · 허용 목록이 이름으로 자료를 가리킨다
 
         Given: 자료별 갱신 방식 표
         When: 이름을 센다
@@ -99,23 +99,23 @@ class TestMethods:
 
 
 class TestNewDayChecks:
-    """새로 붙는 날 검사의 짝 · 배율 (판정 규칙 ②)"""
+    """신규 일자 검사의 비교 대상 · 배율 (판정 규칙 ②)"""
 
-    def test_pair_and_leverage_by_name(self) -> None:
+    def test_reference_and_leverage_by_name(self) -> None:
         """
-        목적: 짝과 배율을 고정한다 — QQQ · QLD · TQQQ 는 나스닥100 지수, SPY · SSO · UPRO 는 S&P500 지수, DIA 는 다우 지수,
+        목적: 비교 대상과 배율을 고정한다 — QQQ · QLD · TQQQ 는 나스닥100 지수, SPY · SSO · UPRO 는 S&P500 지수, DIA 는 다우 지수,
               GLD 는 IAU, TLT 는 SPTL 에 견주고(Q29 · Q31), 비트코인 Bitstamp 일봉은 Coin Metrics 기준가에 견준다(Q6).
               배율이 틀리면 기준(배율 × 1%p)과 견줄 수익률이 함께 틀린다
 
         Given: 자료별 갱신 방식 표
-        When: 짝이 있는 자료의 (짝, 배율)을 모은다
-        Then: 정해진 짝 · 배율
+        When: 비교 대상이 있는 자료의 (비교 대상, 배율)을 모은다
+        Then: 정해진 비교 대상 · 배율
         """
         # When
-        pairs = {name: (d.pair, d.leverage) for name, d in BY_NAME.items() if d.pair is not None}
+        references = {name: (d.reference, d.leverage) for name, d in BY_NAME.items() if d.reference is not None}
 
         # Then
-        assert pairs == {
+        assert references == {
             "QQQ": ("^NDX", 1.0),
             "QLD": ("^NDX", 2.0),
             "TQQQ": ("^NDX", 3.0),
@@ -128,21 +128,21 @@ class TestNewDayChecks:
             "BTCUSD": ("BTC_PriceUSD", 1.0),
         }
 
-    def test_pairs_are_fetched_catalog_datasets(self) -> None:
+    def test_references_are_fetched_catalog_datasets(self) -> None:
         """
-        목적: 짝은 표 안의 자료이고 고정이 아니다 — 짝을 받지 않으면 새로 붙는 날의 짝 값이 없어 모든 날이 멈춘다
+        목적: 비교 대상은 표 안의 자료이고 고정이 아니다 — 비교 대상을 받지 않으면 신규 일자의 비교 값이 없어 모든 날이 멈춘다
 
-        Given: 짝이 있는 자료들
-        When: 짝 이름으로 표를 찾는다
-        Then: 짝마다 표에 있고 고정이 아니다
+        Given: 비교 대상이 있는 자료들
+        When: 비교 대상 이름으로 표를 찾는다
+        Then: 비교 대상마다 표에 있고 고정이 아니다
         """
         # When
-        pair_names = {d.pair for d in CATALOG if d.pair is not None}
+        reference_names = {d.reference for d in CATALOG if d.reference is not None}
 
         # Then
-        for pair in pair_names:
-            assert pair in BY_NAME
-            assert BY_NAME[pair].method is not Method.FIXED
+        for reference in reference_names:
+            assert reference in BY_NAME
+            assert BY_NAME[reference].method is not Method.FIXED
 
 
 class TestFiles:
@@ -172,8 +172,8 @@ class TestFiles:
     def test_files_by_name(self, name: str, files: tuple[str, ...]) -> None:
         """
         목적: 자료마다 저장 파일을 고정한다 — 다시 받는 · 처음 받는 미국 ETF 는 한 응답에서 원본가 · 수정주가 둘, 지수는
-              원본가 하나, 고정 펀드 · 금 선물은 quant 첫 판 그대로 수정주가 하나, 국내 ETF 는 KRX 원본가와 야후 분배 기록
-              (수정주가는 가공), 국내 지수 · NAV · Coin Metrics 는 하루 한 값 계열, 비트코인 일봉은 원본가
+              원본가 하나, 고정 펀드 · 금 선물은 quant 첫 버전 그대로 수정주가 하나, 국내 ETF 는 KRX 원본가와 야후 분배 기록
+              (수정주가는 가공), 국내 지수 · NAV · Coin Metrics 는 일별 시계열, 비트코인 일봉은 원본가
 
         Given: 자료별 갱신 방식 표
         When: 이름으로 파일을 찾는다
@@ -224,7 +224,7 @@ class TestFiles:
 
     def test_series_decimals(self) -> None:
         """
-        목적: 하루 한 값 계열의 저장 자릿수 — Coin Metrics 기준가는 시세처럼 6자리, MVRV 는 배수라 4자리, 시가총액은 달러라 0자리
+        목적: 일별 시계열의 저장 자릿수 — Coin Metrics 기준가는 시세처럼 6자리, MVRV 는 배수라 4자리, 시가총액은 달러라 0자리
 
         Given: 자료별 갱신 방식 표
         When: Coin Metrics 자료의 자릿수를 모은다

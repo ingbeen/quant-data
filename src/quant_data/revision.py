@@ -1,8 +1,8 @@
 """다시 받은 시세 ↔ 기존 시세 파일 판정 (판정 규칙 ①)
 
 야후는 수정 종가를 요청마다 미세하게 다르게 주고, 배당 기록을 늦게 넣거나 넣었다가 빼기도 한다.
-다시 받은 응답을 기존 파일과 견줘 셋으로 가른다 — 흔들림뿐(기존 행 그대로 + 새 날짜 행), 응답의 배당 기록으로
-설명되는 변화(응답으로 덮어씀), 그 밖(비정상 — --exclude · --accept 는 사람이 정한다). 분할은 기록과 맞아도
+다시 받은 응답을 기존 파일과 견줘 셋으로 가른다 — 노이즈뿐(기존 행 그대로 + 새 날짜 행), 배당 반영(응답의
+배당 기록과 맞는 변화 — 응답으로 덮어씀), 그 밖(비정상 — --exclude · --accept 는 사람이 정한다). 분할은 기록과 맞아도
 비정상이다 — 사람이 운용사 공시와 날짜 · 비율을 맞춰 본 뒤 받아들인다(결정 Q23). 기준값의 근거는
 docs/research/시세_받기_판정.md 결정 14.
 """
@@ -21,7 +21,7 @@ import pandas as pd
 
 from quant_data.constants import COL_CLOSE, COL_DATE, PRICE_COLUMNS, REQUIRED_COLUMNS
 
-# 흔들림 상한(상대) — 관측 흔들림 최대 4.9e-6 의 4배, 가장 작은 배당(배당 ÷ 전날 종가) 5.9e-5 의 1/3 (2026-11-07)
+# 허용 오차(상대) — 관측 노이즈 최대 4.9e-6 의 4배, 가장 작은 배당(배당 ÷ 전날 종가) 5.9e-5 의 1/3 (2026-11-07)
 # 기록과 맞출 때도 같은 상한으로 비율을 견줌 — 야후 배당 1,438건의 (1 + 계단) ÷ 기록 비율이 최대 2.1e-6 안
 REVISION_NOISE_TOLERANCE: Final = 2e-5
 MAX_ISSUE_LINES: Final = 5
@@ -31,16 +31,16 @@ _DATE_ISSUE_WEIGHT: Final = float("inf")  # 날짜 변화는 가격 변화보다
 
 class RevisionKind(Enum):
     NEW = "새 파일"
-    NOISE = "흔들림뿐"
-    EXPLAINED = "기록으로 설명되는 변화"
+    NOISE = "노이즈뿐"
+    DIVIDEND_ADJUSTED = "배당 반영"
     ABNORMAL = "비정상"
 
 
 @dataclass(frozen=True)
 class PriceEvents:
-    """응답의 배당 · 분할 기록과 원시 종가 — 기준일로 잘라내기 전 전체 응답(수정 비율이 잘라낸 날의 배당까지 반영한다).
+    """응답의 배당 · 분할 기록과 원본 종가 — 기준일로 잘라내기 전 전체 응답(수정 비율이 잘라낸 날의 배당까지 반영한다).
 
-    dividends · splits 는 날짜(date) → 금액 · 배수(값이 있는 날만), raw_close 는 날짜 오름차순의 원시 종가다.
+    dividends · splits 는 날짜(date) → 금액 · 배수(값이 있는 날만), raw_close 는 날짜 오름차순의 원본 종가다.
     """
 
     dividends: pd.Series
@@ -54,9 +54,9 @@ class PriceRevision:
 
     kind: RevisionKind
     prices: pd.DataFrame
-    issues: tuple[str, ...]  # 비정상 원인 줄 — 큰 것부터
-    applied: tuple[str, ...]  # 기록으로 설명된 변화
-    split_changes: tuple[tuple[date, float], ...]  # 기록과 맞은 분할 (날짜, 배수) — 원인 블록의 공시 대조 안내
+    issues: tuple[str, ...]  # 비정상 진단 줄 — 큰 것부터
+    applied: tuple[str, ...]  # 기록과 맞은 배당
+    split_changes: tuple[tuple[date, float], ...]  # 기록과 맞은 분할 (날짜, 배수) — 진단 출력의 공시 대조 안내
     existing_end: date | None
     existing_rows: int
     response_end: date
@@ -101,7 +101,7 @@ def judge_revision(
     Args:
         existing: 기존 파일 (load_prices 모양 — 날짜 오름차순, 가격은 price_decimals 자리). 없으면 None
         response: 받은 시세 (REQUIRED_COLUMNS, 날짜 오름차순, 기준일까지)
-        events: 같은 응답의 배당 · 분할 기록과 원시 종가
+        events: 같은 응답의 배당 · 분할 기록과 원본 종가
         price_decimals: 기존 파일 가격의 자릿수 — 반올림 오차는 변화로 보지 않는다
         explain_dividends: 배당 기록으로 변화를 설명하는가 — 수정주가는 True, 원본가는 False(야후 원본가는 분할만
             과거에 반영된다)
@@ -175,16 +175,16 @@ def judge_revision(
     dates = list(pair[COL_DATE])
     found = _price_findings(dates, stored, received, events, half_unit, explain_dividends)
     issues += found.issues
-    # 흔들림 상한은 넘었는데 맞춘 기록도 잡힌 원인도 없음 → 설명되지 않은 변화라 덮어쓰지 않음
+    # 허용 오차는 넘었는데 맞춘 기록도 잡힌 원인도 없음 → 설명되지 않은 변화라 덮어쓰지 않음
     if not issues and not found.applied:
         issues.append(_unrecorded_small_change(dates, stored, received, half_unit))
-    kind = RevisionKind.ABNORMAL if issues else RevisionKind.EXPLAINED
+    kind = RevisionKind.ABNORMAL if issues else RevisionKind.DIVIDEND_ADJUSTED
     return revision(kind, response, issues, list(found.applied), list(found.split_changes))
 
 
 @dataclass(frozen=True)
 class _Findings:
-    """기록과 맞춘 결과 — 비정상 원인, 기록으로 설명된 변화, 기록과 맞은 분할."""
+    """기록과 맞춘 결과 — 비정상 원인, 기록과 맞은 배당, 기록과 맞은 분할."""
 
     issues: tuple[_Issue, ...]
     applied: tuple[str, ...]
@@ -201,7 +201,7 @@ class _Records:
         self._explain_dividends = explain_dividends
 
     def between(self, *, after: date, until: date | None = None) -> list[_Event]:
-        """after < 날짜 ≤ until 인 기록 (날짜순). 배당의 조정 비율은 1 − 배당 ÷ 전날 원시 종가, 분할은 1 ÷ 배수."""
+        """after < 날짜 ≤ until 인 기록 (날짜순). 배당의 조정 비율은 1 − 배당 ÷ 전날 원본 종가, 분할은 1 ÷ 배수."""
 
         def in_range(day: date) -> bool:
             return day > after and (until is None or day <= until)
@@ -270,7 +270,7 @@ def _row_span(dates: list[date], rows: np.ndarray) -> str:
 
 
 def _split_text(splits: Sequence[tuple[date, float]]) -> str:
-    """원인 줄의 분할 문구 — 사람이 운용사 공시와 맞춰 볼 날짜 · 배수."""
+    """진단 줄의 분할 문구 — 사람이 운용사 공시와 맞춰 볼 날짜 · 배수."""
     return " · ".join(f"분할로 보이는 변화: {day} · {ratio:g}배 (야후 기록)" for day, ratio in splits)
 
 
@@ -278,12 +278,12 @@ def _unrecorded_small_change(dates: list[date], stored: np.ndarray, received: np
     beyond = np.abs(received - stored) > REVISION_NOISE_TOLERANCE * np.abs(stored) + half_unit
     rows = np.flatnonzero(beyond.any(axis=1))
     if rows.size == 0:
-        raise RuntimeError("내부 불변조건 위반: 흔들림 상한을 넘은 값이 없는데 흔들림 판정을 지나왔습니다")
+        raise RuntimeError("내부 불변조건 위반: 허용 오차를 넘은 값이 없는데 노이즈 판정을 지나왔습니다")
     deviation = received / stored - 1
     worst = float(deviation.flat[np.argmax(np.where(beyond, np.abs(deviation), 0.0))])
     return _Issue(
         abs(worst),
-        f"기록 없는 작은 변화 — {rows.size:,}행이 흔들림 상한을 넘음, 가장 큰 차 {worst:+.4%} ({_row_span(dates, rows)})",
+        f"기록 없는 작은 변화 — {rows.size:,}행이 허용 오차를 넘음, 가장 큰 차 {worst:+.4%} ({_row_span(dates, rows)})",
     )
 
 
@@ -452,7 +452,7 @@ def format_abnormal_block(
     yfinance_version: str,
 ) -> str:
     """
-    비정상 종목의 원인 블록 — 사용자가 그대로 AI 에 붙여 판단을 받는다. --exclude · --accept 는 사람이 정한다.
+    비정상 종목의 진단 출력 — 사용자가 그대로 AI 에 붙여 판단을 받는다. --exclude · --accept 는 사람이 정한다.
 
     Args:
         entries: (자료 이름, 파일 경로, 비정상 판정)

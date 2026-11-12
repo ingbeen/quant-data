@@ -1,4 +1,4 @@
-"""사람 · AI 가 쓰는 기록 파일(패스 목록)의 공통 읽기 — 한글 머리 · BOM 붙은 CSV."""
+"""사람 · AI 가 쓰는 기록 파일(허용 목록)의 공통 읽기 — 한글 헤더 · BOM 붙은 CSV."""
 
 import csv
 import re
@@ -15,15 +15,15 @@ def read_record_rows(path: Path, columns: tuple[str, ...], name: str) -> list[tu
 
     Raises:
         FileNotFoundError: 파일이 없을 때 — 빈 기록으로 넘기면 지워진 파일을 알아채지 못한다
-        ValueError: 머리가 columns 가 아닐 때, 칸 수가 다른 줄이 있을 때
+        ValueError: 헤더가 columns 가 아닐 때, 칸 수가 다른 줄이 있을 때
     """
     if not path.exists():
-        raise FileNotFoundError(f"{name} 파일이 없습니다: {path} — 머리({','.join(columns)})만 있는 파일이라도 두어야 합니다")
+        raise FileNotFoundError(f"{name} 파일이 없습니다: {path} — 헤더({','.join(columns)})만 있는 파일이라도 두어야 합니다")
     with path.open(encoding="utf-8-sig", newline="") as file:
         reader = list(csv.reader(file))
     if not reader or tuple(cell.strip() for cell in reader[0]) != columns:
         found = reader[0] if reader else []
-        raise ValueError(f"{name} {path} 의 머리가 {list(columns)} 가 아닙니다: {found}")
+        raise ValueError(f"{name} {path} 의 헤더가 {list(columns)} 가 아닙니다: {found}")
     rows: list[tuple[int, tuple[str, ...]]] = []
     for line, row in enumerate(reader[1:], start=2):
         if not any(cell.strip() for cell in row):

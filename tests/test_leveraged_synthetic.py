@@ -122,7 +122,7 @@ class TestBuildCostInputs:
 
     def test_no_cap_option(self):
         """
-        목적: 상한 없는 판(검증 ④)은 모든 달이 모형 값이다
+        목적: 상한 없음 시나리오(검증 ④)는 모든 달이 모형 값이다
 
         Given: 같은 금리
         When: build_cost_inputs(spread_cap=None)
@@ -294,7 +294,7 @@ class TestBuildLeveragedSynthetics:
 
     def test_does_not_write_files(self, tmp_path: Path):
         """
-        목적: 합성은 파일을 쓰지 않는다 — 쓰면 뒤에 받기 · 판정이 멈춰도 합성 파일만 바뀐 판이 남는다(결정 Q17)
+        목적: 합성은 파일을 쓰지 않는다 — 쓰면 뒤에 받기 · 판정이 멈춰도 합성 파일만 바뀐 버전이 남는다(결정 Q17)
 
         Given: 상품 둘의 합성 파일 경로(없는 폴더 out/)
         When: build_leveraged_synthetics
@@ -330,7 +330,7 @@ class TestBuildLeveragedSynthetics:
     def test_returns_runs_in_target_order(self, tmp_path: Path):
         """
         목적: 검증 ④ 에 넘길 상품별 기초 · 시뮬레이션 · 실물을 표 순서대로 돌려준다 — 검증은 상품을 이 기초로
-              묶으므로 다른 줄의 기초가 실리면 다른 기초로 잰 판이 에러 없이 나간다
+              묶으므로 다른 줄의 기초가 실리면 다른 기초로 잰 검증 표가 에러 없이 나간다
 
         Given: 상품 둘
         When: build_leveraged_synthetics

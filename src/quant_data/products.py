@@ -5,7 +5,7 @@
    운용보수를 뺀 것이다. 검증 ① 대용 ↔ 실물 — 금 사슬은 이음매마다
 2. 레버리지 합성 (leveraged.constants.LEVERAGED_SYNTHETIC_TARGETS): 저장할 값(6자리)으로 반올림한 1배 합성을 상장일까지
    굴려 잇는다
-3. 검증 ④ 가정만 바꾼 판. ② 추적 · ③ 펀드 대조는 고정 시점 기록이라 만들지 않는다(결정 Q32)
+3. 검증 ④ 가정만 바꾼 시나리오. ② 추적 · ③ 펀드 대조는 고정 시점 기록이라 만들지 않는다(결정 Q32)
 4. 국내 수정주가(C-2): 표의 국내 ETF 마다 KRX 원본가 · 야후 분배 기록으로 `_adjusted` 를 만들고 야후 분배 대조를 붙인다
 
 검증 숫자로는 멈추지 않는다 — 멈추는 것은 이어 붙인 결과의 이음매 뒤 행이 실물과 다를 때와, 상품 표와 ④ 대상 표의
@@ -31,7 +31,7 @@ from quant_data.constants import (
     VALIDATION_DIR,
 )
 from quant_data.domestic import build_kr_adjusted
-from quant_data.leveraged.comparison import VARIANT_ADOPTED, AssumptionResult, annual_gap_rate, assumption_variants
+from quant_data.leveraged.comparison import SCENARIO_ADOPTED, AssumptionResult, annual_gap_rate, assumption_scenarios
 from quant_data.leveraged.monthly_data import load_monthly_data
 from quant_data.leveraged.synthetic import LeveragedRun, build_leveraged_synthetics
 from quant_data.logger import get_logger
@@ -76,7 +76,7 @@ US_CALENDAR_DATA_PATH: Final = price_path("VFINX", _ADJUSTED)
 # 금 사슬은 금값이라 상품 보수가 없음 → GLD 처럼 덜 좋게 잡으려고 뺌 (결정 13)
 GLD_EXPENSE_RATIO: Final = 0.004  # GLD 운용보수 비율 (0.004 = 0.4%)
 
-# 검증 ④ 대상 — (1배 기초, 구간 끝을 정하는 첫 레버리지 상품, 배당 보정 폭을 잴 1배 대상 — None 이면 보정 판 없음)
+# 검증 ④ 대상 — (1배 기초, 구간 끝을 정하는 첫 레버리지 상품, 배당 보정 폭을 잴 1배 대상 — None 이면 배당 보정 시나리오 없음)
 ASSUMPTION_TARGETS: Final[tuple[tuple[Path, Path, str | None], ...]] = (
     (price_path("QQQ", _SYNTHETIC), price_path("UOPIX", _ADJUSTED), "QQQ"),
     # VFINX 는 배당을 담음 → 보정할 것이 없음
@@ -91,13 +91,13 @@ DISPLAY_TARGET: Final = "대상"
 DISPLAY_PROXY_FILE: Final = "대용 파일"
 DISPLAY_ACTUAL_FILE: Final = "실물 파일"
 DISPLAY_PROXY_FIRST_DATE: Final = "대용 첫날"
-DISPLAY_VARIANT: Final = "판"
+DISPLAY_SCENARIO: Final = "시나리오"
 DISPLAY_PRODUCT: Final = "상품"
 DISPLAY_LEVERAGE: Final = "배율"
 DISPLAY_CAGR: Final = "CAGR(%)"
 DISPLAY_MDD: Final = "MDD(%)"
-DISPLAY_VARIANT_CAGR_DIFF: Final = "채택 대비 CAGR 차(%p)"
-DISPLAY_VARIANT_MDD_DIFF: Final = "채택 대비 MDD 차(%p)"
+DISPLAY_SCENARIO_CAGR_DIFF: Final = "채택 대비 CAGR 차(%p)"
+DISPLAY_SCENARIO_MDD_DIFF: Final = "채택 대비 MDD 차(%p)"
 
 
 @dataclass(frozen=True)
@@ -274,7 +274,7 @@ def _assumptions_table(
     proxy_summaries: dict[str, PairSummary],
     inputs: _Inputs,
 ) -> pd.DataFrame:
-    """검증 ④ — 기초마다 대조할 실물이 없는 구간(1배 합성 첫날 ~ 첫 레버리지 상품 첫날 전날)에서 가정만 바꾼 판.
+    """검증 ④ — 기초마다 대조할 실물이 없는 구간(1배 합성 첫날 ~ 첫 레버리지 상품 첫날 전날)에서 가정만 바꾼 시나리오.
 
     상품은 합성을 만든 기초로 묶는다. 배당 보정 폭은 ① 에서 지수의 연 수익을 실물 ETF 의 연 수익으로 맞추는 비율이다
     (배당 − ETF 보수).
@@ -301,7 +301,7 @@ def _assumptions_table(
             dividend_gap_rate = annual_gap_rate(summary.proxy_cagr, summary.actual_cagr)
             logger.debug(f"{dividend_target} 배당 보정 폭: 연 {dividend_gap_rate * 100:.4f}% (① 지수 연 수익을 실물로 맞추는 비율)")
         results.extend(
-            assumption_variants(
+            assumption_scenarios(
                 group[0].underlying,
                 ffr_df,
                 expense_df,
@@ -310,22 +310,22 @@ def _assumptions_table(
                 dividend_gap_rate=dividend_gap_rate,
             )
         )
-    adopted = {r.product: r for r in results if r.variant == VARIANT_ADOPTED}
+    adopted = {r.product: r for r in results if r.scenario == SCENARIO_ADOPTED}
     rows = [
         {
-            DISPLAY_VARIANT: r.variant,
+            DISPLAY_SCENARIO: r.scenario,
             DISPLAY_PRODUCT: r.product,
             DISPLAY_LEVERAGE: r.leverage,
             DISPLAY_START: r.start,
             DISPLAY_END: r.end,
             DISPLAY_CAGR: r.cagr,
             DISPLAY_MDD: r.mdd,
-            DISPLAY_VARIANT_CAGR_DIFF: r.cagr - adopted[r.product].cagr,
-            DISPLAY_VARIANT_MDD_DIFF: r.mdd - adopted[r.product].mdd,
+            DISPLAY_SCENARIO_CAGR_DIFF: r.cagr - adopted[r.product].cagr,
+            DISPLAY_SCENARIO_MDD_DIFF: r.mdd - adopted[r.product].mdd,
         }
         for r in results
     ]
     digits = {
-        col: ROUND_PERCENT for col in (DISPLAY_CAGR, DISPLAY_MDD, DISPLAY_VARIANT_CAGR_DIFF, DISPLAY_VARIANT_MDD_DIFF)
+        col: ROUND_PERCENT for col in (DISPLAY_CAGR, DISPLAY_MDD, DISPLAY_SCENARIO_CAGR_DIFF, DISPLAY_SCENARIO_MDD_DIFF)
     }
     return pd.DataFrame(rows).round(digits)

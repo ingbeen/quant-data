@@ -55,9 +55,9 @@ PERTH_COLUMNS: Final = (COL_SOURCE_DATE, COL_AUD_BID, COL_AUD_ASK, COL_USD_BID, 
 DAILY_VALUE_COLUMNS: Final = (COL_SOURCE_DATE, COL_SOURCE_VALUE)
 _PRICE_PAIRS: Final = ((COL_AUD_BID, COL_AUD_ASK), (COL_USD_BID, COL_USD_ASK))
 
-# Perth CSV 머리 다섯 줄의 첫 칸 — 다르면 형식이 바뀐 것
+# Perth CSV 헤더 다섯 줄의 첫 칸 — 다르면 형식이 바뀐 것
 _PERTH_HEADER_LABELS: Final = ("Market", "Metal/Currency", "Priced In", "Price Type", "Summary")
-# (통화, 가격 종류) → 저장 열 — 머리의 Metal 이 Gold, Summary 가 Average 인 열만
+# (통화, 가격 종류) → 저장 열 — 헤더의 Metal 이 Gold, Summary 가 Average 인 열만
 _PERTH_AVERAGE_COLUMNS: Final = {
     ("AUD", "Bid"): COL_AUD_BID,
     ("AUD", "Ask"): COL_AUD_ASK,
@@ -151,11 +151,11 @@ def _parse_perth_date(text: str, line_no: int) -> date:
 
 
 def _find_perth_average_columns(header: list[list[str]]) -> dict[str, int]:
-    """머리 다섯 줄에서 Gold · Average 의 호주달러 · 달러 bid · ask 열 위치를 찾는다."""
+    """헤더 다섯 줄에서 Gold · Average 의 호주달러 · 달러 bid · ask 열 위치를 찾는다."""
     labels = tuple(row[0].strip() if row else "" for row in header)
     if labels != _PERTH_HEADER_LABELS:
         raise ValueError(
-            f"Perth Mint 금값 CSV 의 머리 첫 칸이 {list(_PERTH_HEADER_LABELS)} 가 아닙니다: {list(labels)} — 형식이 바뀌었는지 확인하세요"
+            f"Perth Mint 금값 CSV 의 헤더 첫 칸이 {list(_PERTH_HEADER_LABELS)} 가 아닙니다: {list(labels)} — 형식이 바뀌었는지 확인하세요"
         )
 
     def cell(row: int, col: int) -> str:
@@ -182,18 +182,18 @@ def parse_perth_mint_gold_csv(csv_text: str) -> pd.DataFrame:
     Perth Mint 금값 보관 CSV 를 저장 형식으로 바꾼다 — 받은 숫자 그대로, 값이 있는 날만.
 
     Args:
-        csv_text: 보관 CSV 본문 (머리 다섯 줄 뒤 `d/mm/yy` 날짜 줄)
+        csv_text: 보관 CSV 본문 (헤더 다섯 줄 뒤 `d/mm/yy` 날짜 줄)
 
     Returns:
         PERTH_COLUMNS 표 (DATE: date — 호주 날짜, 나머지: float, 그날 그 통화 값이 없으면 NaN)
 
     Raises:
-        ValueError: 머리가 다를 때, 날짜 · 숫자가 형식에 맞지 않을 때, _validate_perth_table 과 같은 경우
+        ValueError: 헤더가 다를 때, 날짜 · 숫자가 형식에 맞지 않을 때, _validate_perth_table 과 같은 경우
     """
     rows = list(csv.reader(io.StringIO(csv_text)))
     header_size = len(_PERTH_HEADER_LABELS)
     if len(rows) < header_size:
-        raise ValueError(f"Perth Mint 금값 CSV 의 머리가 {header_size}줄보다 짧습니다")
+        raise ValueError(f"Perth Mint 금값 CSV 의 헤더가 {header_size}줄보다 짧습니다")
     columns = _find_perth_average_columns(rows[:header_size])
 
     records: list[dict[str, object]] = []
@@ -226,13 +226,13 @@ def parse_fred_daily_csv(csv_text: str, series_id: str) -> pd.DataFrame:
         DAILY_VALUE_COLUMNS 표 (DATE: date, VALUE: float)
 
     Raises:
-        ValueError: 머리가 다를 때, 날짜가 YYYY-MM-DD 가 아닐 때, 값이 숫자가 아니거나 0 이하일 때, _validate_daily_values 와 같은 경우
+        ValueError: 헤더가 다를 때, 날짜가 YYYY-MM-DD 가 아닐 때, 값이 숫자가 아니거나 0 이하일 때, _validate_daily_values 와 같은 경우
     """
     raw = pd.read_csv(io.StringIO(csv_text), dtype=str, keep_default_na=False)
     expected = (FRED_DATE_COLUMN, series_id)
     if tuple(raw.columns) != expected:
         raise ValueError(
-            f"FRED {series_id} CSV 의 머리가 {list(expected)} 가 아닙니다: {list(raw.columns)} — FRED 형식이 바뀌었는지 확인하세요"
+            f"FRED {series_id} CSV 의 헤더가 {list(expected)} 가 아닙니다: {list(raw.columns)} — FRED 형식이 바뀌었는지 확인하세요"
         )
 
     dates = raw[FRED_DATE_COLUMN].str.strip()

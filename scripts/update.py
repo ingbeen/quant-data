@@ -1,9 +1,9 @@
 """
-갱신 — 받기 → 판정 → 가공(합성 · 검증 표) → (전부 성공했을 때만) 쓰기 → 판 요약
+갱신 — 받기 → 판정 → 가공(합성 · 검증 표) → (전부 성공했을 때만) 쓰기 → 매니페스트
 
 자료별 갱신 방식 표(src/quant_data/catalog.py)대로 다시 받음 · 덧붙이기 자료를 받고, 고정 자료는 받지 않는다.
-비정상이나 새로 붙는 날 실패가 하나라도 있으면 원인을 한 번에 내고 아무 파일도 쓰지 않은 채 종료 코드 1 로 끝난다 —
-사람이 확인한 뒤 --exclude · --accept 를 정하거나 패스 목록에 적고 다시 실행한다.
+비정상이나 신규 일자 실패가 하나라도 있으면 원인을 한 번에 내고 아무 파일도 쓰지 않은 채 종료 코드 1 로 끝난다 —
+사람이 확인한 뒤 --exclude · --accept 를 정하거나 허용 목록에 적고 다시 실행한다.
 
 실행 명령은 docs/COMMANDS.md 가 정본이다.
 """
@@ -16,10 +16,10 @@ from pathlib import Path
 
 from quant_data.catalog import CATALOG
 from quant_data.cli import cli_exception_handler
-from quant_data.constants import EDITION_PATH, REPO_ROOT
-from quant_data.edition import KEY_CUTOFF, read_edition
+from quant_data.constants import MANIFEST_PATH, REPO_ROOT
 from quant_data.leveraged.monthly_data import fetch_ffr_monthly
 from quant_data.logger import get_logger
+from quant_data.manifest import KEY_CUTOFF, read_manifest
 from quant_data.products import build_products
 from quant_data.sources.bitstamp import fetch_bitstamp_history
 from quant_data.sources.coinmetrics import fetch_coinmetrics_series
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-fetch",
         action="store_true",
-        help="받지 않고 지금 파일로 가공 · 판 요약만 한다 (기준일은 판 요약의 것)",
+        help="받지 않고 지금 파일로 가공 · 매니페스트만 한다 (기준일은 매니페스트의 것)",
     )
     return parser.parse_args()
 
@@ -68,12 +68,12 @@ def _parse_date(text: str) -> date:
 
 
 def _cutoff_without_fetch(root: Path, end: date | None) -> date:
-    """받지 않는 갱신의 기준일 — 판 요약의 기준일을 그대로 쓴다."""
+    """받지 않는 갱신의 기준일 — 매니페스트의 기준일을 그대로 쓴다."""
     if end is not None:
         raise ValueError("받지 않는 갱신은 기준일을 바꾸지 않습니다 — --end 를 빼고 실행하세요")
-    previous = read_edition(root / EDITION_PATH)
+    previous = read_manifest(root / MANIFEST_PATH)
     if previous is None:
-        raise ValueError(f"판 요약({EDITION_PATH})이 없습니다 — 받지 않는 갱신은 판 요약의 기준일을 씁니다. git 이력에서 되살리세요")
+        raise ValueError(f"매니페스트({MANIFEST_PATH})가 없습니다 — 받지 않는 갱신은 매니페스트의 기준일을 씁니다. git 이력에서 되살리세요")
     return date.fromisoformat(previous[KEY_CUTOFF])
 
 
@@ -113,14 +113,14 @@ def main() -> int:
     if result.stopped:
         report = format_stop_report(result, run_at=now, cutoff_date=cutoff_date, yfinance_version=YFINANCE_VERSION)
         logger.warning(f"멈춤 — 원인:\n{report}")
-        logger.error("아무 파일도 쓰지 않았습니다 — 위 원인을 확인하고 --exclude · --accept 를 정하거나 패스 목록에 적은 뒤 다시 실행하세요")
+        logger.error("아무 파일도 쓰지 않았습니다 — 위 원인을 확인하고 --exclude · --accept 를 정하거나 허용 목록에 적은 뒤 다시 실행하세요")
         return 1
 
-    logger.debug(f"썼음: {len(result.written)}개 파일 (판 요약 {EDITION_PATH})")
+    logger.debug(f"썼음: {len(result.written)}개 파일 (매니페스트 {MANIFEST_PATH})")
     if result.excluded:
-        logger.warning(f"제외한 자료(옛 값 · 옛 끝날 그대로): {list(result.excluded)} — 판 요약에 「제외」로 적었습니다")
+        logger.warning(f"제외한 자료(옛 값 · 옛 끝날 그대로): {list(result.excluded)} — 매니페스트에 「제외」로 적었습니다")
     if result.accepted:
-        logger.warning(f"받아들인 자료(이번 응답으로 덮어씀): {list(result.accepted)} — 판 요약에 「받아들임」으로 적었습니다")
+        logger.warning(f"받아들인 자료(이번 응답으로 덮어씀): {list(result.accepted)} — 매니페스트에 「받아들임」으로 적었습니다")
     return 0
 
 
