@@ -3,7 +3,8 @@
 
 자료별 갱신 방식 표(src/quant_data/catalog.py)대로 다시 받음 · 덧붙이기 자료를 받고, 고정 자료는 받지 않는다.
 비정상이나 신규 일자 실패가 하나라도 있으면 원인을 한 번에 내고 아무 파일도 쓰지 않은 채 종료 코드 1 로 끝난다 —
-사람이 확인한 뒤 --exclude · --accept 를 정하거나 허용 목록에 적고 다시 실행한다.
+사람이 확인한 뒤 --exclude · --accept 를 정하거나 허용 목록에 적고 다시 실행한다. 비트코인의 아직 끝나지 않은 날도 멈추고
+다시 실행할 시각을 알린다.
 
 실행 명령은 docs/COMMANDS.md 가 정본이다.
 """
@@ -50,7 +51,10 @@ def parse_args() -> argparse.Namespace:
         "--end",
         type=_parse_date,
         default=None,
-        help="받을 마지막 날 YYYY-MM-DD (그날 포함, 오늘까지). 뉴욕에서 그날 봉이 끝나기 전인 날은 빠진다. 미지정 시 그저께",
+        help=(
+            "받을 마지막 날 YYYY-MM-DD (그날 포함, 오늘까지). 뉴욕에서 그날 봉이 끝나기 전인 날은 빠지고, "
+            "비트코인 날이 아직 끝나지 않았으면 멈추고 다시 실행할 시각을 알린다. 미지정 시 그저께"
+        ),
     )
     parser.add_argument(
         "--no-fetch",
@@ -113,7 +117,10 @@ def main() -> int:
     if result.stopped:
         report = format_stop_report(result, run_at=now, cutoff_date=cutoff_date, yfinance_version=YFINANCE_VERSION)
         logger.warning(f"멈춤 — 원인:\n{report}")
-        logger.error("아무 파일도 쓰지 않았습니다 — 위 원인을 확인하고 --exclude · --accept 를 정하거나 허용 목록에 적은 뒤 다시 실행하세요")
+        if result.not_ready and not result.abnormal and not result.new_day_failures:
+            logger.error("아무 파일도 쓰지 않았습니다 — 비트코인의 아직 끝나지 않은 날입니다. 위 보고 머리줄의 시각 뒤에 다시 실행하세요")
+        else:
+            logger.error("아무 파일도 쓰지 않았습니다 — 위 원인을 확인하고 --exclude · --accept 를 정하거나 허용 목록에 적은 뒤 다시 실행하세요")
         return 1
 
     logger.debug(f"썼음: {len(result.written)}개 파일 (매니페스트 {MANIFEST_PATH})")

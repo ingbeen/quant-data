@@ -14,7 +14,7 @@ import math
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 import pandas as pd
@@ -31,6 +31,8 @@ COINMETRICS_ASSET: Final = "btc"
 FIRST_DAY: Final = date(2010, 7, 18)  # 마운트곡스 개장일 — 받는 세 지표의 첫 날 (verify-lab 실측)
 PAGE_SIZE: Final = 10_000  # 커뮤니티 API 최대
 PUBLICATION_LAG_DAYS: Final = 1  # 함정 2
+# 날짜 d 의 값이 다 차는 때 = d+1 일 UTC 00:00 + 이 값 — 함정 2 의 실측(02:28 ~ 03:32)에 여유. 다시 실행할 시각 안내에만 씀
+VALUE_COMPLETE_AFTER: Final = timedelta(hours=4)
 _USER_AGENT: Final = "quant-data"
 _TIMEOUT_SECONDS: Final = 60
 

@@ -5,12 +5,13 @@
 보이고 아무 파일도 쓰지 않는다. 받기 · 가공의 예외는 그 자리에서 올라가고 역시 쓰지 않는다(결정 Q17).
 비정상은 사람이 --exclude(옛 값 · 옛 끝날 그대로) 또는 --accept(이번 응답으로 덮어씀)로 정하고(결정 Q16),
 신규 일자 실패는 허용 목록으로만 넘긴다. 고정 자료는 받지 않는다(결정 Q20) — 매니페스트에 오른 적 없는 고정 자료만
-파일이 없을 때 한 번 받는다(최초 수집, 사용자 결정 2026-11-11).
+파일이 없을 때 한 번 받는다(최초 수집, 사용자 결정 2026-11-11). 받은 비트코인 파일이 기준일까지 오지 않았으면(아직 끝나지 않은 날)
+다시 실행할 시각을 알리고 멈춘다 — 시각 문제라 허용 목록으로 넘기지 않는다(판정 문서 3.2 「코인 끝나지 않은 날」).
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Final
@@ -61,6 +62,8 @@ from quant_data.prices import (
 )
 from quant_data.revision import PriceEvents, PriceRevision, RevisionKind, format_abnormal_block, judge_revision
 from quant_data.series import SERIES_COLUMNS, judge_series_append, load_series, save_series, validate_series
+from quant_data.sources.bitstamp import BAR_COMPLETE_AFTER
+from quant_data.sources.coinmetrics import VALUE_COMPLETE_AFTER
 from quant_data.sources.yahoo import YahooResponse
 
 logger = get_logger(__name__)
@@ -84,6 +87,7 @@ _STATUS_BY_KIND = {
     RevisionKind.DIVIDEND_ADJUSTED: STATUS_DIVIDEND_ADJUSTED,
 }
 _TABLE_ENCODING = "utf-8-sig"  # 검증 표는 한글 헤더 — Excel 이 BOM 없는 UTF-8 을 깨뜨려 읽는다
+_COIN_COMPLETE_AFTER: Final = {Kind.BITSTAMP: BAR_COMPLETE_AFTER, Kind.COINMETRICS: VALUE_COMPLETE_AFTER}
 
 
 class _Form(Enum):
@@ -129,6 +133,16 @@ class Abnormal:
 
 
 @dataclass(frozen=True)
+class NotReady:
+    """받은 비트코인 파일 하나의 아직 끝나지 않은 날 — complete_at 은 기준일의 값이 다 차는 때(UTC, 안내에만 쓴다)."""
+
+    name: str
+    path: Path
+    last_day: date
+    complete_at: datetime
+
+
+@dataclass(frozen=True)
 class UpdateResult:
     """갱신 결과 — stopped 면 written 이 비어 있다(아무 파일도 쓰지 않음)."""
 
@@ -138,6 +152,7 @@ class UpdateResult:
     excluded: tuple[str, ...]
     accepted: tuple[str, ...]
     written: tuple[Path, ...]
+    not_ready: tuple[NotReady, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -222,10 +237,14 @@ def run_update(
         name for name, outcome in outcomes.items() if any(file.status == STATUS_ACCEPTED for file in outcome.files)
     )
     abnormal = tuple(file.abnormal for o in outcomes.values() for file in o.files if file.abnormal is not None)
-    failures = tuple(remaining_failures(_new_day_failures(by_name, outcomes, root), allowlist))
-    if abnormal or failures:
-        logger.warning(f"멈춤 — 비정상 {len(abnormal)}건 · 신규 일자 실패 {len(failures)}건, 아무 파일도 쓰지 않았습니다")
-        return UpdateResult(True, abnormal, failures, excluded, accepted, ())
+    not_ready = _not_ready_coin_files(outcomes, cutoff_date)
+    not_ready_names = {item.name for item in not_ready}
+    failures = tuple(remaining_failures(_new_day_failures(by_name, outcomes, root, not_ready_names), allowlist))
+    if abnormal or failures or not_ready:
+        logger.warning(
+            f"멈춤 — 비정상 {len(abnormal)}건 · 신규 일자 실패 {len(failures)}건 · 아직 끝나지 않은 날 {len(not_ready)}건, " "아무 파일도 쓰지 않았습니다"
+        )
+        return UpdateResult(True, abnormal, failures, excluded, accepted, (), not_ready)
 
     updated = {file.path: file.table for outcome in outcomes.values() for file in outcome.files}
     products = build_products(updated)
@@ -476,8 +495,29 @@ def _status(
     return "", Abnormal(name, path, issues, revision)
 
 
+def _not_ready_coin_files(outcomes: Mapping[str, _DatasetOutcome], cutoff_date: date) -> tuple[NotReady, ...]:
+    """
+    받은 비트코인 파일 중 끝날이 기준일보다 이른 것 — 비트코인은 쉬는 날이 없어 기준일까지 없으면 그날이 아직 끝나지 않았다
+    (뉴욕 18:00 ~ 한국 09:00 의 --end · Coin Metrics 공개 전). 주식은 휴장 때문에 이 규칙을 쓸 수 없고 기준일을 내려 맞춘다.
+    """
+    day_after_cutoff = datetime.combine(cutoff_date + timedelta(days=1), time(0), tzinfo=UTC)
+    found: list[NotReady] = []
+    for outcome in outcomes.values():
+        complete_after = _COIN_COMPLETE_AFTER.get(outcome.dataset.kind)
+        if complete_after is None:
+            continue
+        for file in outcome.files:
+            last_day: date = file.table[COL_DATE].iloc[-1]
+            if last_day < cutoff_date:
+                found.append(NotReady(outcome.dataset.name, file.path, last_day, day_after_cutoff + complete_after))
+    return tuple(found)
+
+
 def _new_day_failures(
-    by_name: Mapping[str, Dataset], outcomes: Mapping[str, _DatasetOutcome], root: Path
+    by_name: Mapping[str, Dataset],
+    outcomes: Mapping[str, _DatasetOutcome],
+    root: Path,
+    not_ready_names: Collection[str],
 ) -> list[NewDayFailure]:
     """판정 규칙 ② — 비정상(받아들이지 않음)인 자료는 판정 규칙 ① 만 보인다."""
     failures: list[NewDayFailure] = []
@@ -511,6 +551,9 @@ def _new_day_failures(
             days = appended_days(target.existing, target.table)
             if days:
                 reference = _reference_series(by_name[dataset.reference], outcomes, root)
+                if dataset.reference in not_ready_names and not outcomes[dataset.reference].abnormal:
+                    # 이 실행은 비교 대상의 아직 끝나지 않은 날로 반드시 멈춤 → 그 끝날 뒤는 시각 문제라 교차 확인에서 뺌
+                    days = [day for day in days if day <= reference[COL_DATE].iloc[-1]]
                 failures += check_coin_cross(
                     target.table, reference, ticker=name, reference_name=dataset.reference, days=days
                 )
@@ -694,5 +737,20 @@ def format_stop_report(result: UpdateResult, *, run_at: datetime, cutoff_date: d
             f"  - {failure.ticker},{failure.day},{failure.check.value} — {failure.detail}"
             for failure in result.new_day_failures
         ]
+        sections.append("\n".join(lines))
+    if result.not_ready:
+        ready_end = min(item.last_day for item in result.not_ready)
+        latest = max(item.complete_at for item in result.not_ready).astimezone(run_at.tzinfo)
+        lines = [
+            f"[아직 끝나지 않은 날 — 시각 문제라 허용 목록에 적을 일이 아닙니다. "
+            f"{latest:%Y-%m-%d %H:%M} {latest.tzname()} 뒤에 다시 실행하세요 (아래 줄 중 가장 늦은 시각)]",
+            f"지금 받으려면 --end {ready_end} 로 실행하세요 — 아래 파일은 모두 그날까지 찼습니다",
+        ]
+        for item in result.not_ready:
+            local = item.complete_at.astimezone(run_at.tzinfo)
+            lines.append(
+                f"  - {item.name} ({item.path}): 끝날 {item.last_day} · 기준일 {cutoff_date} — "
+                f"{local:%Y-%m-%d %H:%M} {local.tzname()} 뒤에 다 참"
+            )
         sections.append("\n".join(lines))
     return "\n\n".join(sections)

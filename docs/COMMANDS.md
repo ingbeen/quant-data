@@ -24,6 +24,10 @@ poetry run python scripts/update.py --accept QQQ
 poetry run python scripts/update.py --no-fetch
 ```
 
+비트코인은 뉴욕이 아니라 UTC 하루(한국 09:00 에 바뀐다)를 따르고, Coin Metrics 는 그날 값을 다음 날 UTC 새벽에 채운다. `--end` 로
+아직 끝나지 않은 비트코인 날을 주면 갱신이 「아직 끝나지 않은 날」로 멈추고 출처마다 다시 실행할 시각과 지금 받을 수 있는 `--end` 를
+알려 준다 — 데이터 오류가 아니라 허용 목록에 적지 않는다. 기본값(그저께)은 걸리지 않는다.
+
 신규 일자 검사에 걸린 날은 `storage/records/allowlist.csv` 에 `종목,날짜,검사,사유,근거` 한 줄을 적고 다시 실행한다.
 
 매니페스트에 오른 적 없는 고정 자료가 있으면 그 갱신이 한 번 받는다 — 국내(KRX) 자료가 들면 `.env` 의 KRX 계정이 필요하고

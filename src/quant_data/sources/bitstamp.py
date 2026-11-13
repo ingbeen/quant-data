@@ -14,7 +14,7 @@
 import json
 import urllib.error
 import urllib.request
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
 import pandas as pd
@@ -30,6 +30,8 @@ DAY_SECONDS: Final = 86_400
 PAGE_LIMIT = 1_000  # 요청 한 번에 받는 봉 수 — Bitstamp 가 허용하는 최대값
 FIRST_TRADE_TIMESTAMP: Final = 1_313_625_600  # 2011-08-18 00:00 UTC (함정 1)
 FIRST_TRADE_DATE: Final[date] = datetime.fromtimestamp(FIRST_TRADE_TIMESTAMP, tz=UTC).date()
+# 날짜 d 의 봉은 d+1 일 UTC 00:00 에 확정(함정 2) — 갱신이 다시 실행할 시각을 알리는 데만 씀
+BAR_COMPLETE_AFTER: Final = timedelta(0)
 _USER_AGENT: Final = "quant-data"
 _TIMEOUT_SECONDS: Final = 60
 _FIELD_TO_COLUMN: Final = {"open": COL_OPEN, "high": COL_HIGH, "low": COL_LOW, "close": COL_CLOSE, "volume": COL_VOLUME}

@@ -12,6 +12,8 @@ update 모듈 테스트 — 갱신 명령: 받기 → 판정 → 가공 → (전
    기존 파일이 없으면 미국 벤치마크 대조 · 비트코인 교차 확인을 걸지 않는가? (결정 Q26 · Q29 · Q34)
 8. 국내 ETF 는 KRX 원본가와 야후(.KS) 원본가 · 분배 기록을 받고, 최초 수집은 두 국내 검사를 전 기간에 거는가? (결정 Q14 · Q34)
 9. 비트코인은 Bitstamp 일봉과 Coin Metrics 계열을 덧붙이고, 계열의 지난 값이 바뀌면 멈추는가?
+10. 받은 비트코인 파일의 끝날이 기준일보다 이르면(아직 끝나지 않은 날) 허용 목록으로 넘길 수 없게 멈추고, 다시 실행할 시각을
+    알리는가? 같은 원인의 교차 확인 실패는 내지 않는가?
 6. 월별 금리는 지난 달이 그대로일 때만 새 달을 붙이는가? (결정 Q36)
 7. 매니페스트에 파일마다 종목 · 기간 · 행 수 · 상태 · 분배 기록 첫날이 적히는가? (결정 Q12)
 
@@ -1628,3 +1630,124 @@ class TestCoin:
         # Then
         assert result.stopped
         assert [(a.name, a.path) for a in result.abnormal] == [("BTC_PriceUSD", BTC_PRICE)]
+
+    def test_bitstamp_short_of_cutoff_stops_as_not_ready(self, btc_root: Path) -> None:
+        """
+        목적: 받은 비트코인 파일의 끝날이 기준일보다 이르면 「아직 끝나지 않은 날」로 멈추고 아무 파일도 쓰지 않는다 —
+              비트코인은 쉬는 날이 없어 끝날 < 기준일이면 그날 봉이 아직 안 끝난 것이다(뉴욕 18:00 ~ 한국 09:00 의 --end)
+
+        Given: 기준일 11-06, Bitstamp · Coin Metrics 응답이 11-05 까지(4일)
+        When: run_update
+        Then: 멈춤, 아직 끝나지 않은 날 = [BTCUSD, BTC_PriceUSD], 신규 일자 실패 없음, storage 바이트 그대로
+        """
+        # Given
+        before = _snapshot(btc_root)
+        sources = _btc_sources(bitstamp=BTC_CLOSES[:4], reference=BTC_CLOSES[:4])
+
+        # When
+        result = _run(btc_root, sources, catalog=(BTC, BTC_PRICE_DATASET))
+
+        # Then
+        assert result.stopped
+        assert [item.name for item in result.not_ready] == ["BTCUSD", "BTC_PriceUSD"]
+        assert result.new_day_failures == ()
+        assert _snapshot(btc_root) == before
+
+    def test_coinmetrics_short_of_cutoff_stops_without_cross_check_failure(self, btc_root: Path) -> None:
+        """
+        목적: Coin Metrics 가 그날 값을 아직 완성하지 않았으면 「아직 끝나지 않은 날」로 멈추고, 같은 원인의 교차 확인 실패
+              (「값이 없어 견줄 수 없음」)는 내지 않는다 — 허용 목록으로 넘길 일이 아니다
+
+        Given: 기준일 11-06, Bitstamp 11-06 까지(5일), Coin Metrics 11-05 까지(4일)
+        When: run_update
+        Then: 멈춤, 아직 끝나지 않은 날 = [BTC_PriceUSD], 신규 일자 실패 없음
+        """
+        # When
+        result = _run(btc_root, _btc_sources(reference=BTC_CLOSES[:4]), catalog=(BTC, BTC_PRICE_DATASET))
+
+        # Then
+        assert result.stopped
+        assert [item.name for item in result.not_ready] == ["BTC_PriceUSD"]
+        assert result.new_day_failures == ()
+
+    def test_excluded_reference_keeps_missing_value_failure(self, btc_root: Path) -> None:
+        """
+        목적: 비교 대상을 받지 않았으면(--exclude) 「아직 끝나지 않은 날」이 아니고, 기준가가 없는 신규 일자는 지금처럼 교차 확인
+              실패로 멈춘다 — 교차 확인에서 날을 빼는 것은 비교 대상이 「아직 끝나지 않은 날」로 멈출 때뿐이다 (경계)
+
+        Given: --exclude BTC_PriceUSD (기존 11-04 까지), Bitstamp 11-06 까지
+        When: run_update
+        Then: 멈춤, 아직 끝나지 않은 날 없음, 실패 = 11-05 · 11-06 교차 확인 차이
+        """
+        # When
+        result = _run(btc_root, _btc_sources(), catalog=(BTC, BTC_PRICE_DATASET), exclude=frozenset({"BTC_PriceUSD"}))
+
+        # Then
+        assert result.stopped
+        assert result.not_ready == ()
+        assert [(f.ticker, f.day, f.check) for f in result.new_day_failures] == [
+            ("BTCUSD", DAYS[3], Check.COIN_CROSS_CHECK),
+            ("BTCUSD", DAYS[4], Check.COIN_CROSS_CHECK),
+        ]
+
+    def test_not_ready_is_not_released_by_allowlist(self, btc_root: Path) -> None:
+        """
+        목적: 「아직 끝나지 않은 날」은 허용 목록으로 넘어가지 않는다 — 근거 없는 줄로 빠져나가 하루 빠진 파일을 쓰는 길을 막는다
+
+        Given: Coin Metrics 11-05 까지, 허용 목록에 「BTCUSD,2026-11-06,교차 확인 차이,…」
+        When: run_update
+        Then: 멈춤, 아직 끝나지 않은 날 = [BTC_PriceUSD]
+        """
+        # Given
+        with (btc_root / ALLOWLIST_PATH).open("a", encoding="utf-8") as file:
+            file.write("BTCUSD,2026-11-06,교차 확인 차이,테스트 사유,테스트 근거\n")
+
+        # When
+        result = _run(btc_root, _btc_sources(reference=BTC_CLOSES[:4]), catalog=(BTC, BTC_PRICE_DATASET))
+
+        # Then
+        assert result.stopped
+        assert [item.name for item in result.not_ready] == ["BTC_PriceUSD"]
+
+    def test_cutoff_before_response_end_does_not_stop(self, btc_root: Path) -> None:
+        """
+        목적: 응답이 기준일보다 길면 기준일에서 잘라 끝날 = 기준일이 되고, 「아직 끝나지 않은 날」이 아니다 (경계)
+
+        Given: 기준일 11-05, 응답 11-06 까지
+        When: run_update
+        Then: 멈추지 않음, 아직 끝나지 않은 날 없음, Bitstamp 끝날 11-05
+        """
+        # When
+        result = _run(btc_root, _btc_sources(), catalog=(BTC, BTC_PRICE_DATASET), cutoff=DAYS[3])
+
+        # Then
+        assert not result.stopped
+        assert result.not_ready == ()
+        assert load_prices(btc_root / BTC_RAW)[COL_DATE].iloc[-1] == DAYS[3]
+
+    def test_report_has_not_ready_section_with_rerun_time(self, btc_root: Path) -> None:
+        """
+        목적: 멈춤 보고가 「아직 끝나지 않은 날」을 파일마다 다시 실행할 수 있는 시각(실행 시각의 시간대)과 함께 내고, 지금 받을 수
+              있는 --end 를 권하며, 허용 목록으로 안내하지 않는다
+
+        Given: Bitstamp · Coin Metrics 11-05 까지 · 기준일 11-06, 실행 시각 한국
+        When: format_stop_report
+        Then: 「아직 끝나지 않은 날」 머리줄에 가장 늦은 시각 「2026-11-07 13:00 KST」 · BTCUSD 줄에 「2026-11-07 09:00 KST」 ·
+              BTC_PriceUSD 줄에 「2026-11-07 13:00 KST」 · 「--end 2026-11-05」, 허용 목록 경로 없음
+        """
+        # Given
+        sources = _btc_sources(bitstamp=BTC_CLOSES[:4], reference=BTC_CLOSES[:4])
+        result = _run(btc_root, sources, catalog=(BTC, BTC_PRICE_DATASET))
+        run_at = datetime(2026, 11, 7, 8, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+
+        # When
+        report = format_stop_report(result, run_at=run_at, cutoff_date=CUTOFF, yfinance_version="0.2.66")
+
+        # Then
+        lines = report.splitlines()
+        (header,) = [line for line in lines if "아직 끝나지 않은 날" in line]
+        assert "2026-11-07 13:00 KST" in header
+        assert any("BTCUSD" in line and "2026-11-07 09:00 KST" in line for line in lines)
+        assert any("BTC_PriceUSD" in line and "2026-11-07 13:00 KST" in line for line in lines)
+        assert "--end 2026-11-05" in report
+        assert str(ALLOWLIST_PATH) not in report
