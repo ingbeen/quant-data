@@ -146,7 +146,7 @@ CATALOG: tuple[Dataset, ...] = (
     _fund("DIA", Method.REFETCH, reference="^DJI", leverage=1.0),
     _index("^DJI"),
     _index("^IXIC"),
-    # 합성 재료 · 검증용 펀드 — 고정
+    # 합성 재료 · 검증용 펀드 — 고정. 풀기 전에 --end 의 뉴욕 18:00 기준이 맞는지 잰다(시세_받기_판정.md 6.11)
     _fund("VFINX", Method.FIXED, bases=_ADJUSTED_ONLY),
     _fund("VUSTX", Method.FIXED, bases=_ADJUSTED_ONLY),
     _fund("GC=F", Method.FIXED, bases=_ADJUSTED_ONLY),
