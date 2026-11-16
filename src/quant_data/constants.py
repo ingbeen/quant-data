@@ -22,6 +22,7 @@ FFR_DATA_PATH: Final = SERIES_DIR / "federal_funds_rate_monthly.csv"  # FRED 월
 EXPENSE_RATIO_DATA_PATH: Final = SERIES_DIR / "tqqq_net_expense_ratio_monthly.csv"  # TQQQ 순운용비율 (손 갱신)
 PERTH_MINT_GOLD_DATA_PATH: Final = SERIES_DIR / "perth_mint_gold_daily.csv"  # Perth Mint 하루 평균 금값
 AUD_USD_DATA_PATH: Final = SERIES_DIR / "aud_usd_daily.csv"  # FRED 호주달러 환율 (DEXUSAL)
+FEAR_GREED_DATA_PATH: Final = SERIES_DIR / "fear_greed_daily.csv"  # CNN 공포탐욕지수 공개 결합본
 
 # ============================================================
 # 시세 열

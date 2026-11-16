@@ -77,6 +77,7 @@ _FETCHABLE_KINDS: Final = (
     Kind.KRX_NAV,
     Kind.BITSTAMP,
     Kind.COINMETRICS,
+    Kind.FEAR_GREED,
 )
 # KRX 자료는 다시 받을 때의 판정이 없다 — 최초 수집만 하는 고정이어야 한다(국내 합성 2단계에서 판정과 함께 바꾼다)
 _FIXED_ONLY_KINDS: Final = (Kind.KRX_ETF, Kind.KRX_INDEX, Kind.KRX_NAV)
@@ -110,6 +111,7 @@ class Fetchers:
     krx_nav: Callable[[str], pd.DataFrame]
     bitstamp: Callable[[], pd.DataFrame]
     coinmetrics: Callable[[str], pd.DataFrame]
+    fear_greed: Callable[[], pd.DataFrame]
 
 
 @dataclass(frozen=True)
@@ -379,6 +381,10 @@ def _fetch_and_judge(
         table = fetchers.bitstamp()
         (path,) = dataset.files
         return _DatasetOutcome(dataset, (_judge_plain_prices(dataset, path, table, root, cutoff_date, accepted),))
+    if dataset.kind is Kind.FEAR_GREED:
+        series = fetchers.fear_greed()
+        (path,) = dataset.files
+        return _DatasetOutcome(dataset, (_judge_series_file(dataset, path, series, root, cutoff_date, accepted),))
     if dataset.kind in (Kind.KRX_INDEX, Kind.KRX_NAV, Kind.COINMETRICS):
         fetch_series = {
             Kind.KRX_INDEX: fetchers.krx_index,
@@ -625,7 +631,7 @@ def _form_of(dataset: Dataset, path: Path) -> _Form:
         return _Form.PRICES
     if dataset.kind is Kind.KRX_ETF:
         return _Form.PRICES if path == dataset.files[0] else _Form.SERIES
-    if dataset.kind in (Kind.KRX_INDEX, Kind.KRX_NAV, Kind.COINMETRICS):
+    if dataset.kind in (Kind.KRX_INDEX, Kind.KRX_NAV, Kind.COINMETRICS, Kind.FEAR_GREED):
         return _Form.SERIES
     if dataset.kind in (Kind.FRED_MONTHLY, Kind.MANUAL_MONTHLY):
         return _Form.MONTHLY

@@ -48,7 +48,10 @@ class TestMethods:
             name: Method.REFETCH
             for name in ("SPY", "QQQ", "GLD", "TLT", "TQQQ", "SSO", "QLD", "UPRO", "IAU", "SPTL", "DIA")
         }
-        expected |= {name: Method.APPEND for name in ("^NDX", "^GSPC", "^DJI", "^IXIC", "FFR", "BTCUSD", *COIN_METRICS)}
+        expected |= {
+            name: Method.APPEND
+            for name in ("^NDX", "^GSPC", "^DJI", "^IXIC", "FFR", "BTCUSD", *COIN_METRICS, "^VIX", "FEAR_GREED")
+        }
         expected |= {
             name: Method.FIXED
             for name in (
@@ -167,6 +170,8 @@ class TestFiles:
             ("261240_NAV", ("storage/series/261240_NAV.csv",)),
             ("BTCUSD", ("storage/prices/BTCUSD_raw.csv",)),
             ("BTC_PriceUSD", ("storage/series/BTC_PriceUSD.csv",)),
+            ("^VIX", ("storage/prices/^VIX_raw.csv",)),
+            ("FEAR_GREED", ("storage/series/fear_greed_daily.csv",)),
         ],
     )
     def test_files_by_name(self, name: str, files: tuple[str, ...]) -> None:
@@ -208,8 +213,9 @@ class TestFiles:
 
         # Then
         expected = {name: Kind.YAHOO_FUND for name in BY_NAME}
-        expected |= {name: Kind.YAHOO_INDEX for name in ("^NDX", "^GSPC", "^DJI", "^IXIC")}
+        expected |= {name: Kind.YAHOO_INDEX for name in ("^NDX", "^GSPC", "^DJI", "^IXIC", "^VIX")}
         expected |= {
+            "FEAR_GREED": Kind.FEAR_GREED,
             "FFR": Kind.FRED_MONTHLY,
             "EXPENSE": Kind.MANUAL_MONTHLY,
             "PERTH_GOLD": Kind.PERTH_GOLD,
@@ -235,6 +241,16 @@ class TestFiles:
 
         # Then
         assert decimals == {"BTC_PriceUSD": 6, "BTC_CapMVRVCur": 4, "BTC_CapMrktCurUSD": 0}
+
+    def test_fear_greed_decimals(self) -> None:
+        """
+        목적: 공포탐욕지수는 시세와 같은 6자리로 저장한다 — 결합본 값이 정수 또는 소수 13자리라 6자리에서 자른다(결정 Q38)
+
+        Given: 자료별 갱신 방식 표
+        When: 공포탐욕지수의 자릿수
+        Then: 6
+        """
+        assert BY_NAME["FEAR_GREED"].decimals == 6
 
     def test_leveraged_actuals_are_catalog_files(self) -> None:
         """

@@ -24,6 +24,7 @@ from quant_data.manifest import KEY_CUTOFF, read_manifest
 from quant_data.products import build_products
 from quant_data.sources.bitstamp import fetch_bitstamp_history
 from quant_data.sources.coinmetrics import fetch_coinmetrics_series
+from quant_data.sources.fear_greed import fetch_fear_greed
 from quant_data.sources.krx import fetch_krx_etf, fetch_krx_index, fetch_krx_nav
 from quant_data.sources.yahoo import YFINANCE_VERSION, fetch_yahoo, resolve_cutoff_date
 from quant_data.update import Fetchers, format_stop_report, run_update
@@ -103,6 +104,7 @@ def main() -> int:
         krx_nav=fetch_krx_nav,
         bitstamp=lambda: fetch_bitstamp_history(datetime.now(UTC)),
         coinmetrics=lambda metric: fetch_coinmetrics_series(metric, datetime.now(UTC)),
+        fear_greed=fetch_fear_greed,
     )
     result = run_update(
         CATALOG,

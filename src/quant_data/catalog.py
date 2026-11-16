@@ -2,7 +2,8 @@
 
 갱신 방식은 셋이다. 다시 받음(한 응답에서 수정주가는 다시 계산 · 원본가는 덧붙이기), 덧붙이기, 고정(최초 수집 뒤 받지 않음).
 쓰는 곳이 없으면 고정이 기본이다(결정 Q20) — 받으면 판정에 걸려 멈출 일만 는다. 벤치마크 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
-다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인은 새로 나온 날을 받아 붙인다(Q36 · docs/research/시세_받기_판정.md 2장 표). 고정 자료는 매니페스트에 오른 적이
+다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인과 verify-lab 신호용 VIX · 공포탐욕지수는 새로 나온 날을 받아 붙인다(Q36 · Q37 · Q38 ·
+docs/research/시세_받기_판정.md 2장 표). 고정 자료는 매니페스트에 오른 적이
 없을 때만 한 번 받는다(최초 수집). 가공(합성 · 국내 수정주가)은 표에 없다 — 갱신 때마다 다시 만든다.
 """
 
@@ -13,6 +14,7 @@ from pathlib import Path
 from quant_data.constants import (
     AUD_USD_DATA_PATH,
     EXPENSE_RATIO_DATA_PATH,
+    FEAR_GREED_DATA_PATH,
     FFR_DATA_PATH,
     PERTH_MINT_GOLD_DATA_PATH,
     ROUND_INPUT_PRICE,
@@ -41,6 +43,7 @@ class Kind(Enum):
     KRX_NAV = "KRX NAV"
     BITSTAMP = "Bitstamp 일봉"
     COINMETRICS = "Coin Metrics 일별"
+    FEAR_GREED = "공포탐욕지수 결합본"  # CNN 공포탐욕지수의 공개 결합본 — 일별 계열
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,9 @@ CATALOG: tuple[Dataset, ...] = (
     _fund("DIA", Method.REFETCH, reference="^DJI", leverage=1.0),
     _index("^DJI"),
     _index("^IXIC"),
+    # verify-lab 용 하락_단계_매수의 신호 — 덧붙이기(Q37 · Q38)
+    _index("^VIX"),
+    Dataset(name="FEAR_GREED", kind=Kind.FEAR_GREED, method=Method.APPEND, files=(FEAR_GREED_DATA_PATH,)),
     # 합성 재료 · 검증용 펀드 — 고정. 풀기 전에 --end 의 뉴욕 18:00 기준이 맞는지 잰다(시세_받기_판정.md 6.11)
     _fund("VFINX", Method.FIXED, bases=_ADJUSTED_ONLY),
     _fund("VUSTX", Method.FIXED, bases=_ADJUSTED_ONLY),
