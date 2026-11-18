@@ -148,7 +148,7 @@ def _response(
 class FakeSources:
     """받기 대역 — 부른 자료를 순서대로 남기고, fail 에 든 이름은 받기 실패를 낸다.
 
-    calls 에는 야후 티커 · "FFR" · "KRX:{코드}" · "KRX_INDEX:{코드}" · "KRX_NAV:{코드}" · "BITSTAMP" · "CM:{지표}" · "FEAR_GREED" 가 남는다.
+    calls 에는 야후 티커 · "FFR" · "KRX:{코드}" · "KRX_INDEX:{코드}" · "KRX_NAV:{코드}" · "BITSTAMP" · "CM:{지표}" 가 남는다.
     """
 
     def __init__(
@@ -203,10 +203,6 @@ class FakeSources:
         self._record(f"CM:{metric}")
         return self.series[f"CM:{metric}"]
 
-    def _fear_greed(self) -> pd.DataFrame:
-        self._record("FEAR_GREED")
-        return self.series["FEAR_GREED"]
-
     def fetchers(self) -> Fetchers:
         return Fetchers(
             yahoo=self._yahoo,
@@ -216,7 +212,6 @@ class FakeSources:
             krx_nav=self._krx_nav,
             bitstamp=self._bitstamp,
             coinmetrics=self._coinmetrics,
-            fear_greed=self._fear_greed,
         )
 
 
@@ -604,12 +599,21 @@ class TestCatalogCheck:
                 ),
                 "고정",
             ),
+            (
+                Dataset(
+                    name="FEAR_GREED",
+                    kind=Kind.FEAR_GREED,
+                    method=Method.APPEND,
+                    files=(Path("storage/series/fear_greed_daily.csv"),),
+                ),
+                "받는 함수",
+            ),
         ],
-        ids=["reference_missing", "manual_not_fixed", "krx_not_fixed"],
+        ids=["reference_missing", "manual_not_fixed", "krx_not_fixed", "fear_greed_not_fixed"],
     )
     def test_bad_catalog_raises(self, root: Path, dataset: Dataset, pattern: str) -> None:
         """
-        목적: 비교 대상이 표에 없거나, 받는 함수가 없는 종류(손 갱신 등)를 고정이 아닌 방식으로 두거나, KRX 자료를 고정이 아닌
+        목적: 비교 대상이 표에 없거나, 받는 함수가 없는 종류(손 갱신 · 받기를 지운 공포탐욕지수 등)를 고정이 아닌 방식으로 두거나, KRX 자료를 고정이 아닌
               방식으로 두면 받기 전에 멈춘다 — 비교 대상이 없으면 신규 일자가 모두 「견줄 수 없음」으로 멈추고, 받는 함수가 없으면
               갱신 도중에 깨지고, KRX 자료는 다시 받을 때의 판정이 없다(최초 수집만 한다)
 
@@ -1759,92 +1763,60 @@ class TestCoin:
 
 
 FEAR_GREED_PATH = SERIES_DIR / "fear_greed_daily.csv"
-FEAR_GREED = Dataset(name="FEAR_GREED", kind=Kind.FEAR_GREED, method=Method.APPEND, files=(FEAR_GREED_PATH,))
-FEAR_GREED_VALUES = [68.0, 35.942857, 0.0, 12.5, 49.0]
+FEAR_GREED = Dataset(name="FEAR_GREED", kind=Kind.FEAR_GREED, method=Method.FIXED, files=(FEAR_GREED_PATH,))
 
 
-def _fear_greed_sources(values: list[float] | None = None) -> FakeSources:
-    return FakeSources({}, series={"FEAR_GREED": _value_series(values or FEAR_GREED_VALUES)})
+class TestFearGreedFixed:
+    """공포탐욕지수 결합본 — 고정이고 받는 함수가 없다 (결정 Q39)"""
 
-
-class TestFearGreed:
-    """공포탐욕지수 결합본 — 계열 덧붙이기 (결정 Q38)"""
-
-    @pytest.fixture
-    def fear_greed_root(self, root: Path) -> Path:
-        save_series(_value_series(FEAR_GREED_VALUES[:EXISTING_ROWS]), root / FEAR_GREED_PATH, decimals=6)
-        _sync_manifest(root, FEAR_GREED_PATH)
-        return root
-
-    def test_first_fetch_writes_series(self, root: Path) -> None:
+    def test_kept_without_fetching(self, root: Path) -> None:
         """
-        목적: 최초 수집은 응답을 계열(Date · Value)로 저장한다 — 값 0 인 날도 그대로(부호를 보지 않는다)
+        목적: 고정 공포탐욕지수는 받는 함수가 없어도 갱신을 멈추지 않는다 — 받지 않고 파일을 그대로 두며, 매니페스트 항목은
+              기간 그대로 상태만 「고정」이다
 
-        Given: 파일 없음, 응답 5일(0 포함)
+        Given: 공포탐욕지수 파일 3일(값 0 인 날 포함) · 매니페스트와 맞춤, 받기 대역 없음
         When: run_update
-        Then: 멈추지 않음, 받기 호출 = [FEAR_GREED], 저장된 값 = 응답
+        Then: 멈추지 않음, 받기 호출 없음, 파일 바이트 그대로, 매니페스트 항목 = 2026-11-02 · 2026-11-04 · 3행 · 「고정」
         """
         # Given
-        sources = _fear_greed_sources()
+        path = root / FEAR_GREED_PATH
+        save_series(_value_series([68.0, 0.0, 49.0]), path, decimals=6)
+        _sync_manifest(root, FEAR_GREED_PATH)
+        before = path.read_bytes()
+        sources = FakeSources({})
 
         # When
         result = _run(root, sources, catalog=(FEAR_GREED,))
 
         # Then
         assert not result.stopped
-        assert sources.calls == ["FEAR_GREED"]
-        assert load_series(root / FEAR_GREED_PATH)[COL_VALUE].tolist() == pytest.approx(FEAR_GREED_VALUES, abs=1e-12)
+        assert sources.calls == []
+        assert path.read_bytes() == before
+        entry = _manifest(root)[KEY_FILES][FEAR_GREED_PATH.as_posix()]
+        assert (entry[KEY_FIRST_DAY], entry[KEY_LAST_DAY], entry[KEY_ROWS], entry[KEY_STATUS]) == (
+            "2026-11-02",
+            "2026-11-04",
+            3,
+            STATUS_FIXED,
+        )
 
-    def test_appends_new_days(self, fear_greed_root: Path) -> None:
+    def test_corrupt_fixed_file_stops_before_fetching(self, root: Path) -> None:
         """
-        목적: 지난 값이 같으면 새 날만 붙인다
+        목적: 받지 않는 고정 공포탐욕지수도 갱신마다 계열로 읽혀 검사(중복 날짜 · 결측)를 지난다 — 손상된 파일이 매니페스트에
+              「고정」으로 다시 적히지 않는다
 
-        Given: 기존 3일, 응답 5일(같은 값)
+        Given: 같은 날이 두 번 든 공포탐욕지수 파일(매니페스트와는 맞춤), 받기 대역 없음
         When: run_update
-        Then: 멈추지 않음, 5행
-        """
-        # When
-        result = _run(fear_greed_root, _fear_greed_sources(), catalog=(FEAR_GREED,))
-
-        # Then
-        assert not result.stopped
-        assert len(load_series(fear_greed_root / FEAR_GREED_PATH)) == len(DAYS)
-
-    def test_changed_past_value_stops(self, fear_greed_root: Path) -> None:
-        """
-        목적: 결합본이 지난 값을 바꾸면 비정상으로 멈추고 아무 파일도 쓰지 않는다 — 판정 원칙 「데이터가 바뀌면 오류」.
-              결합본은 2021-02-01 이후를 매 실행 CNN 피드로 다시 만들어 이 경로를 실제로 탈 수 있다
-
-        Given: 응답의 11-03 값이 35.942857 → 36.0
-        When: run_update
-        Then: 멈춤, 비정상 = [(FEAR_GREED, 계열 파일)], storage 바이트 그대로
-        """
-        # Given
-        before = _snapshot(fear_greed_root)
-        changed = [68.0, 36.0, *FEAR_GREED_VALUES[2:]]
-
-        # When
-        result = _run(fear_greed_root, _fear_greed_sources(changed), catalog=(FEAR_GREED,))
-
-        # Then
-        assert result.stopped
-        assert [(a.name, a.path) for a in result.abnormal] == [("FEAR_GREED", FEAR_GREED_PATH)]
-        assert _snapshot(fear_greed_root) == before
-
-    def test_existing_file_is_checked_as_series(self, root: Path) -> None:
-        """
-        목적: 기존 공포탐욕지수 파일은 계열로 읽혀 검사(중복 날짜 · 결측)를 지난다 — 손상된 파일에 새 날을 붙이지 않는다
-
-        Given: 같은 날이 두 번 든 기존 파일(매니페스트와는 맞춤)
-        When: run_update
-        Then: ValueError (중복 날짜)
+        Then: ValueError (중복 날짜), 받기 호출 없음
         """
         # Given
         path = root / FEAR_GREED_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame({COL_DATE: [DAYS[0], DAYS[1], DAYS[1]], COL_VALUE: [68.0, 35.0, 35.0]}).to_csv(path, index=False)
         _sync_manifest(root, FEAR_GREED_PATH)
+        sources = FakeSources({})
 
         # When / Then
         with pytest.raises(ValueError, match="중복 날짜"):
-            _run(root, _fear_greed_sources(), catalog=(FEAR_GREED,))
+            _run(root, sources, catalog=(FEAR_GREED,))
+        assert sources.calls == []

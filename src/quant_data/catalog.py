@@ -2,8 +2,7 @@
 
 갱신 방식은 셋이다. 다시 받음(한 응답에서 수정주가는 다시 계산 · 원본가는 덧붙이기), 덧붙이기, 고정(최초 수집 뒤 받지 않음).
 쓰는 곳이 없으면 고정이 기본이다(결정 Q20) — 받으면 판정에 걸려 멈출 일만 는다. 벤치마크 대조에 쓰이는 지수 · ETF 는 덧붙이기 ·
-다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인과 verify-lab 신호용 VIX · 공포탐욕지수는 새로 나온 날을 받아 붙인다(Q36 · Q37 · Q38 ·
-docs/research/시세_받기_판정.md 2장 표). 고정 자료는 매니페스트에 오른 적이
+다시 받음이고(Q29 · Q31), 월별 금리 · 비트코인은 새로 나온 날을 받아 붙인다(Q36 · docs/research/시세_받기_판정.md 2장 표). 고정 자료는 매니페스트에 오른 적이
 없을 때만 한 번 받는다(최초 수집). 가공(합성 · 국내 수정주가)은 표에 없다 — 갱신 때마다 다시 만든다.
 """
 
@@ -92,8 +91,8 @@ def _fund(
     )
 
 
-def _index(name: str) -> Dataset:
-    return Dataset(name=name, kind=Kind.YAHOO_INDEX, method=Method.APPEND, files=(price_path(name, PriceBasis.RAW),))
+def _index(name: str, method: Method = Method.APPEND) -> Dataset:
+    return Dataset(name=name, kind=Kind.YAHOO_INDEX, method=method, files=(price_path(name, PriceBasis.RAW),))
 
 
 def _kr_etf(code: str) -> Dataset:
@@ -149,9 +148,9 @@ CATALOG: tuple[Dataset, ...] = (
     _fund("DIA", Method.REFETCH, reference="^DJI", leverage=1.0),
     _index("^DJI"),
     _index("^IXIC"),
-    # verify-lab 용 하락_단계_매수의 신호 — 덧붙이기(Q37 · Q38)
-    _index("^VIX"),
-    Dataset(name="FEAR_GREED", kind=Kind.FEAR_GREED, method=Method.APPEND, files=(FEAR_GREED_DATA_PATH,)),
+    # verify-lab 하락_단계_매수(조사로 내림)의 신호 — 고정(Q39). 풀기 전에 볼 것은 시세_받기_판정.md 8장
+    _index("^VIX", Method.FIXED),
+    Dataset(name="FEAR_GREED", kind=Kind.FEAR_GREED, method=Method.FIXED, files=(FEAR_GREED_DATA_PATH,)),
     # 합성 재료 · 검증용 펀드 — 고정. 풀기 전에 --end 의 뉴욕 18:00 기준이 맞는지 잰다(시세_받기_판정.md 6.11)
     _fund("VFINX", Method.FIXED, bases=_ADJUSTED_ONLY),
     _fund("VUSTX", Method.FIXED, bases=_ADJUSTED_ONLY),
