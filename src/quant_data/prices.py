@@ -2,7 +2,7 @@
 
 시세 파일 이름은 `{티커}_{가격 기준}.csv` 다(결정 Q10 · Q33). 같은 이름이 저장소마다 다른 기준을 뜻하면 원본가를
 수정주가로 읽어도 에러가 나지 않아, 기준을 이름에 넣고 옛 이름(`_max`)은 받지 않는다.
-검사는 중복 날짜 · 가격의 결측 · 0 · 음수뿐이고 지우거나 메우지 않는다. 하루 급등락은 여기서 보지 않는다 —
+검사는 날짜 결측 · 중복 날짜 · 가격의 결측 · 0 · 음수뿐이고 지우거나 메우지 않는다. 하루 급등락은 여기서 보지 않는다 —
 신규 일자의 판정(new_days)이 멈추고 사람이 확인한다(결정 Q26).
 """
 
@@ -76,13 +76,18 @@ def load_prices(path: Path) -> pd.DataFrame:
 
 
 def validate_price_series(df: pd.DataFrame) -> None:
-    """시세 표에 중복 날짜나 가격 열의 결측 · 0 · 음수가 있으면 ValueError — 지우거나 메우지 않는다.
+    """시세 표에 날짜 결측 · 중복 날짜나 가격 열의 결측 · 0 · 음수가 있으면 ValueError — 지우거나 메우지 않는다.
 
     거래량은 보지 않는다(대용 · 합성 시세는 거래량이 0 이다). 하루 급등락도 보지 않는다(결정 Q26).
 
     Raises:
-        ValueError: 중복 날짜(날짜 포함) · 결측 · 0 · 음수(열 · 인덱스 · 날짜 포함)가 있을 때
+        ValueError: 날짜 결측(인덱스 포함) · 중복 날짜(날짜 포함) · 결측 · 0 · 음수(열 · 인덱스 · 날짜 포함)가 있을 때
     """
+    missing_dates = df.index[df[COL_DATE].isna()].tolist()
+    if missing_dates:
+        ellipsis = "..." if len(missing_dates) > 5 else ""
+        raise ValueError(f"날짜 결측 발견 - {len(missing_dates)}개, 인덱스: {missing_dates[:5]}{ellipsis}")
+
     duplicate_dates = df.loc[df.duplicated(subset=[COL_DATE]), COL_DATE].unique().tolist()
     if duplicate_dates:
         ellipsis = "..." if len(duplicate_dates) > 5 else ""

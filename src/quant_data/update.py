@@ -393,6 +393,9 @@ def _fetch_and_judge(
 
 def _cut(table: pd.DataFrame, existing: pd.DataFrame | None, cutoff_date: date) -> pd.DataFrame:
     """받을 마지막 날까지 — 기존 끝날이 더 뒤면 기존 끝날까지(기존 행을 판정 없이 지우지 않는다)."""
+    missing_dates = table.index[table[COL_DATE].isna()].tolist()
+    if missing_dates:
+        raise ValueError(f"받은 표에 날짜 결측 발견 - {len(missing_dates)}개, 인덱스: {missing_dates[:5]}")
     last_day = cutoff_date if existing is None or existing.empty else max(cutoff_date, existing[COL_DATE].iloc[-1])
     return table[table[COL_DATE] <= last_day].reset_index(drop=True)
 

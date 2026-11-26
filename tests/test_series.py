@@ -3,7 +3,7 @@ series 모듈 테스트 — 일별 시계열(국내 지수 종가 · NAV · Coin
 
 이 파일은 무엇을 검증하나요?
 1. 저장 → 읽기가 날짜 · 값을 그대로 되돌리고, 저장 자릿수로 반올림하는가?
-2. 중복 날짜 · 결측 값은 지우거나 메우지 않고 멈추는가? 행이 없는 계열(분배 기록이 0건인 ETF)은 받는가?
+2. 날짜 결측 · 중복 날짜 · 결측 값은 지우거나 메우지 않고 멈추는가? 행이 없는 계열(분배 기록이 0건인 ETF)은 받는가?
 3. 덧붙이기 판정: 지난 날 값이 노이즈 안이면 기존 행 그대로에 새 날만 붙이고, 값이 바뀌거나 지난 날이 사라지거나
    기존 끝날 앞에 새 날이 생기면 비정상인가? (판정 원칙)
 
@@ -90,16 +90,17 @@ class TestValidate:
         [
             (_series([1.0, 2.0], days=[DAYS[0], DAYS[0]]), "중복"),
             (_series([1.0, float("nan")]), "결측"),
+            (_series([1.0, 2.0], days=[DAYS[0], pd.NaT]), "날짜 결측"),
         ],
-        ids=["duplicate", "nan"],
+        ids=["duplicate", "nan", "missing_date"],
     )
     def test_bad_series_raises(self, frame: pd.DataFrame, pattern: str) -> None:
         """
-        목적: 중복 날짜 · 결측 값이면 멈춘다 — 메우면 「원래 없던 값」과 「메운 값」을 가를 수 없다
+        목적: 날짜 결측 · 중복 날짜 · 결측 값이면 멈춘다 — 메우면 「원래 없던 값」과 「메운 값」을 가를 수 없다
 
-        Given: 같은 날 두 행 / 결측 값
+        Given: 같은 날 두 행 / 결측 값 / 빈 날짜
         When: validate_series
-        Then: ValueError (중복 / 결측)
+        Then: ValueError (중복 / 결측 / 날짜 결측)
         """
         with pytest.raises(ValueError, match=pattern):
             validate_series(frame)

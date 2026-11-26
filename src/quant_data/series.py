@@ -1,7 +1,7 @@
 """일별 시계열 — 읽기 · 검사 · 저장 · 덧붙이기 판정
 
 국내 지수 종가 · NAV · Coin Metrics 지표 · 국내 ETF 의 야후 분배 기록이 이 모양(Date · Value)이다. 단위는 계열마다 달라
-(원 · 달러 · 배) 저장 자릿수는 갱신 방식 표가 계열마다 정한다. 검사는 중복 날짜 · 결측뿐이다 — 부호 · 변동폭은 보지 않고,
+(원 · 달러 · 배) 저장 자릿수는 갱신 방식 표가 계열마다 정한다. 검사는 날짜 결측 · 중복 날짜 · 값 결측뿐이다 — 부호 · 변동폭은 보지 않고,
 값의 범위는 받는 함수가 계열에 맞게 본다.
 """
 
@@ -44,11 +44,14 @@ def load_series(path: Path) -> pd.DataFrame:
 
 def validate_series(df: pd.DataFrame) -> None:
     """
-    계열에 중복 날짜나 결측 값이 있으면 ValueError — 지우거나 메우지 않는다.
+    계열에 날짜 결측 · 중복 날짜 · 결측 값이 있으면 ValueError — 지우거나 메우지 않는다.
 
     Raises:
-        ValueError: 중복 날짜 · 결측 값 (날짜 포함)
+        ValueError: 날짜 결측 (인덱스 포함) · 중복 날짜 · 결측 값 (날짜 포함)
     """
+    missing_dates = df.index[df[COL_DATE].isna()].tolist()
+    if missing_dates:
+        raise ValueError(f"날짜 결측 발견 - {len(missing_dates)}개, 인덱스: {missing_dates[:5]}")
     duplicated = df.loc[df.duplicated(subset=[COL_DATE]), COL_DATE].unique().tolist()
     if duplicated:
         raise ValueError(f"중복 날짜 발견 - {len(duplicated)}개, 날짜: {duplicated[:5]}")
@@ -88,7 +91,7 @@ def judge_series_append(existing: pd.DataFrame | None, response: pd.DataFrame, *
     응답 그대로(NEW).
 
     Raises:
-        ValueError: 응답에 중복 날짜 · 결측 값이 있을 때 (validate_series)
+        ValueError: 응답에 날짜 결측 · 중복 날짜 · 결측 값이 있을 때 (validate_series)
     """
     response = response[SERIES_COLUMNS].reset_index(drop=True)
     validate_series(response)

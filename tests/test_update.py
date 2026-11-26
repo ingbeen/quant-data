@@ -27,6 +27,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from datetime import date, datetime
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -732,6 +733,15 @@ class TestStopWritesNothing:
 
         # When & Then
         with pytest.raises(ConnectionError, match="받기 실패 대역"):
+            _run(root, sources)
+        assert _snapshot(root) == before
+
+    def test_response_with_a_missing_date_stops_without_writing(self, root: Path) -> None:
+        before = _snapshot(root)
+        days = [*DAYS[:-1], cast(date, pd.NaT)]
+        sources = _normal_sources(**{"^NDX": _response(NDX_CLOSES, days=days)})
+
+        with pytest.raises(ValueError, match="날짜 결측"):
             _run(root, sources)
         assert _snapshot(root) == before
 

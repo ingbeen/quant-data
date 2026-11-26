@@ -10,4 +10,3 @@
 - 실행 명령: [docs/COMMANDS.md](docs/COMMANDS.md)
 - 작업 규칙: [CLAUDE.md](CLAUDE.md)
 - 결정과 근거: `docs/research/시세_받기_판정.md`(받기 · 판정 · 국내 수정주가) · `docs/research/합성_시세_연장.md`(합성)
-- 미룬 코드 리뷰 지적: [docs/DEFERRED_FINDINGS.md](docs/DEFERRED_FINDINGS.md)

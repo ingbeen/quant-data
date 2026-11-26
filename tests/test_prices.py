@@ -3,7 +3,7 @@ prices 모듈 테스트 — 시세 파일의 이름 · 읽기 · 검사 · 저�
 
 이 파일은 무엇을 검증하나요?
 1. 시세 파일 이름이 가격 기준(원본가 · 수정주가 · 합성)을 말하는가? (결정 Q10 · Q33)
-2. CSV 를 읽을 때 날짜를 파싱 · 정렬하고, 필수 열 누락 · 중복 날짜 · 가격의 결측 · 0 · 음수면 멈추는가?
+2. CSV 를 읽을 때 날짜를 파싱 · 정렬하고, 필수 열 누락 · 날짜 결측 · 중복 날짜 · 가격의 결측 · 0 · 음수면 멈추는가?
 3. 저장이 가격 반올림(6자리) → 검사 → 저장 순서를 지키고, 검사에 걸리면 파일을 쓰지 않는가?
 4. 하루 급등락으로는 검사 · 저장이 멈추지 않는가? (결정 Q26 — 신규 일자의 판정이 맡는다)
 
@@ -310,7 +310,7 @@ class TestLoadPrices:
 
 
 class TestValidatePriceSeries:
-    """시세 표 검사 — 중복 날짜 · 가격의 결측 · 0 · 음수 (지우거나 메우지 않는다)"""
+    """시세 표 검사 — 날짜 결측 · 중복 날짜 · 가격의 결측 · 0 · 음수 (지우거나 메우지 않는다)"""
 
     def test_valid_data_passes(self) -> None:
         """
@@ -362,6 +362,13 @@ class TestValidatePriceSeries:
 
         # When & Then
         with pytest.raises(ValueError, match="중복 날짜 발견"):
+            validate_price_series(df)
+
+    def test_missing_date_stops_instead_of_passing(self) -> None:
+        df = _make_valid_df()
+        df.loc[1, COL_DATE] = pd.NaT
+
+        with pytest.raises(ValueError, match="날짜 결측 발견"):
             validate_price_series(df)
 
     def test_extreme_daily_change_is_not_checked(self) -> None:
